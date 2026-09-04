@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Sentinel - 自主測試與品質評測哨兵平台</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- 頂部導航 -->
+    <header class="top-nav">
+      <div class="brand">
+        <span class="logo-shield">🛡️</span>
+        <div class="brand-text">
+          <h1>TEST SENTINEL</h1>
+          <span class="version-tag">AI-Native Quality & Eval Daemon</span>
+        </div>
+      </div>
+
+      <div class="project-selector-bar">
+        <label for="projectSelect">當前專案：</label>
+        <select id="projectSelect" class="styled-select">
+          <option value="">載入中...</option>
+        </select>
+        <button id="refreshBtn" class="btn btn-icon" title="重新掃描專案">🔄</button>
+      </div>
+
+      <div class="sentinel-status">
+        <span class="pulse-dot active" id="fseventDot"></span>
+        <span class="status-label" id="fseventStatus">FSEvents 哨兵守候中 (0 Token)</span>
+      </div>
+    </header>
+
+    <!-- 主體內容區 -->
+    <main class="dashboard-body">
+      <!-- 側邊欄：專案畫像與模式選擇 -->
+      <aside class="sidebar-card">
+        <div class="section-title">
+          <span>📋 專案架構指紋</span>
+        </div>
+        <div id="projectInfo" class="meta-box">
+          <p class="empty-hint">請選擇或掃描專案...</p>
+        </div>
+
+        <div class="section-title mt-4">
+          <span>🎯 評測模式 (可切換)</span>
+        </div>
+        <div class="mode-tabs">
+          <button class="mode-btn active" data-mode="diff-e2e">
+            <span class="mode-icon">⚡</span>
+            <div class="mode-info">
+              <strong>模式 A: Git Diff E2E</strong>
+              <small>暫存探針 + 變異測試 + 安全網</small>
+            </div>
+          </button>
+          <button class="mode-btn" data-mode="skill-eval">
+            <span class="mode-icon">🧠</span>
+            <div class="mode-info">
+              <strong>模式 B: Skill 效益評測</strong>
+              <small>正負題庫 + Token 增益比對</small>
+            </div>
+          </button>
+          <button class="mode-btn" data-mode="harness-eval">
+            <span class="mode-icon">🧪</span>
+            <div class="mode-info">
+              <strong>模式 C: Harness 健檢</strong>
+              <small>故障注入 + 冪等性驗證</small>
+            </div>
+          </button>
+        </div>
+
+        <div class="mt-4">
+          <button id="runActionBtn" class="btn btn-primary btn-block">🚀 執行當前模式驗證</button>
+        </div>
+      </aside>
+
+      <!-- 主要內容區 -->
+      <section class="main-content">
+        <!-- 頂部卡片：GitNexus 知識圖譜與爆炸半徑 -->
+        <div class="card blast-radius-card">
+          <div class="card-header">
+            <div class="header-left">
+              <span class="card-icon">🌐</span>
+              <h3>GitNexus 變更雷達與爆炸半徑 (Blast Radius)</h3>
+            </div>
+            <span id="gnIndexBadge" class="badge badge-neutral">檢查索引中</span>
+          </div>
+          <div class="card-body">
+            <div id="gitnexusStatusText" class="gn-summary">
+              正在透過 GitNexus 掃描當前 Git Diff 影響的符號與執行路徑...
+            </div>
+            <div id="affectedList" class="affected-grid mt-3"></div>
+          </div>
+        </div>
+
+        <!-- 中部卡片：2 跨到 3 智慧自癒 Mock 引擎 (針對舊專案) -->
+        <div class="card mock-engine-card mt-3">
+          <div class="card-header">
+            <div class="header-left">
+              <span class="card-icon">🧩</span>
+              <h3>2 $\rightarrow$ 3 零測資自癒 Mock 引擎 (Legacy Rescue)</h3>
+            </div>
+            <span class="badge badge-accent">AST 推導 + Runtime 自癒</span>
+          </div>
+          <div class="card-body">
+            <div class="mock-grid">
+              <div class="mock-column">
+                <div class="col-title">[解法 2] 靜態 AST 逆向提取 (Seed Mock)</div>
+                <pre id="seedMockView" class="code-view">點擊「執行推導」或執行評測以生成...</pre>
+                <button id="extractAstBtn" class="btn btn-sm btn-outline mt-2">🔍 靜態掃描目標元件</button>
+              </div>
+              <div class="mock-column">
+                <div class="col-title">[解法 3] 執行期崩潰動態自癒 (Healed Mock)</div>
+                <pre id="healedMockView" class="code-view">等待執行期報錯反饋...</pre>
+                <button id="simulateHealBtn" class="btn btn-sm btn-outline mt-2">🩹 模擬補全自癒測試</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 底部卡片：品質計分卡與行動回饋 (Scorecard) -->
+        <div class="card scorecard-card mt-3">
+          <div class="card-header">
+            <div class="header-left">
+              <span class="card-icon">📊</span>
+              <h3>測試鑑別度與品質計分卡 (Quality Scorecard)</h3>
+            </div>
+            <div id="overallScoreBadge" class="score-pill">85 / 100 GOOD</div>
+          </div>
+          <div class="card-body">
+            <div class="metrics-row">
+              <div class="metric-item">
+                <span class="metric-num text-success" id="metricKillRate">100%</span>
+                <span class="metric-label">變異擊殺率 (Mutation Kill)</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-num text-info" id="metricSilentErrors">0</span>
+                <span class="metric-label">未捕捉運行期崩潰</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-num text-warning" id="metricBlastRisk">LOW</span>
+                <span class="metric-label">GitNexus 波及風險</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-num text-accent" id="metricProbeStatus">隔離存檔</span>
+                <span class="metric-label">.test-eval 狀態</span>
+              </div>
+            </div>
+
+            <div class="insights-box mt-3">
+              <h4>💡 AI 品質審查回饋與行動建議：</h4>
+              <ul id="insightsList">
+                <li>請點擊「🚀 執行當前模式驗證」開始進行全面健康評估。</li>
+              </ul>
+            </div>
+
+            <div class="actions-bar mt-3">
+              <button id="promoteBtn" class="btn btn-secondary">⭐ 一鍵晉升為正式測試 (Promote to Core)</button>
+              <button id="saveMockBtn" class="btn btn-outline">💾 固化 Mock 快照 (解法 1 永久復用)</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

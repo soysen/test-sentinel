@@ -1,0 +1,30 @@
+{
+  "name": "test-sentinel",
+  "version": "1.0.0",
+  "description": "Autonomous AI-Native Testing & Evaluation Platform with GitNexus Blast Radius Analysis, 2-to-3 Self-Healing Mock Engine, and Reactive FSEvent Sentinel",
+  "main": "src/server/app.js",
+  "bin": {
+    "test-sentinel": "src/cli/test-sentinel.js",
+    "sentinel-gate": "src/cli/watch-gate.js"
+  },
+  "scripts": {
+    "start": "node src/server/app.js",
+    "dev": "node src/server/app.js",
+    "gate": "node src/cli/watch-gate.js",
+    "test": "node tests/self-test.js"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "keywords": [
+    "testing",
+    "e2e",
+    "playwright",
+    "gitnexus",
+    "eval",
+    "mutation-testing",
+    "sentinel",
+    "fsevents"
+  ],
+  "author": "Nelson Chung",
+  "license": "MIT"
+}
