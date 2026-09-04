@@ -193,7 +193,7 @@ const server = http.createServer((req, res) => {
     return readJsonBody((err, body) => {
       try {
         const evaluator = new SkillEvaluator(body.projectPath);
-        const report = evaluator.evaluateSkill(body.skillPath);
+        const report = evaluator.evaluateSkill(body.skillPath, body.cases);
         return jsonResponse(report);
       } catch (e) {
         return jsonResponse({ error: e.message }, 500);

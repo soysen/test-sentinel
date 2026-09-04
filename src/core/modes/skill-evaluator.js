@@ -11,7 +11,7 @@ class SkillEvaluator {
     this.projectPath = path.resolve(projectPath);
   }
 
-  evaluateSkill(skillPath) {
+  evaluateSkill(skillPath, customCases = null) {
     const fullPath = path.resolve(this.projectPath, skillPath);
     if (!fs.existsSync(fullPath)) {
       throw new Error(`Skill file not found: ${fullPath}`);
@@ -23,8 +23,20 @@ class SkillEvaluator {
     // 1. Prompt Token 負載與品質體檢
     const promptAudit = this.auditPromptWeight(rawContent, meta);
 
-    // 2. 自動合成基準題庫 (2 In-domain, 2 Distractor)
-    const benchmarkSuite = this.generateBenchmarkSuite(meta);
+    // 2. 自動合成基準題庫 (若有傳入自訂或修改後的測案，優先採用自訂題庫)
+    let benchmarkSuite;
+    if (Array.isArray(customCases) && customCases.length > 0) {
+      benchmarkSuite = customCases.map((c, idx) => ({
+        id: idx + 1,
+        type: c.type?.includes('正向') || c.type === 'in-domain' ? 'in-domain' : 'distractor',
+        query: c.input || c.query,
+        expectedTrigger: typeof c.expectedTrigger === 'boolean'
+          ? c.expectedTrigger
+          : (c.type?.includes('正向') || c.type === 'in-domain' || c.expected?.includes('>= 35%'))
+      }));
+    } else {
+      benchmarkSuite = this.generateBenchmarkSuite(meta);
+    }
 
     // 3. 實施觸發鑑別度實測 (Recall vs Precision)
     const discriminationResult = this.testTriggerDiscrimination(meta, benchmarkSuite);

@@ -227,8 +227,15 @@
                     <!-- 左欄：輸入與信心解析 -->
                     <div class="inspector-col">
                       <div class="detail-group">
-                        <label>輸入刺激 (Query / Input)：</label>
-                        <pre id="inspectInput" class="code-view-sm"></pre>
+                        <div class="detail-label-row">
+                          <label for="inspectInput">輸入刺激 (Query / Input) - 可自由編輯自訂：</label>
+                          <span id="caseCustomBadge" class="badge badge-accent hidden">已自訂修改</span>
+                        </div>
+                        <textarea id="inspectInput" class="code-textarea-sm" rows="3" placeholder="請輸入使用者測試提問或情境指令..."></textarea>
+                        <div class="input-action-bar mt-1">
+                          <small class="text-muted">修改後將即時同步至本測案，點擊執行即可進行深度客製測試</small>
+                          <button type="button" id="btnResetInput" class="link-btn hidden">還原預設</button>
+                        </div>
                       </div>
 
                       <div class="detail-group mt-2">

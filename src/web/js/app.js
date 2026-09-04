@@ -49,6 +49,8 @@ const inspectorCaseTitle = document.getElementById('inspectorCaseTitle');
 const inspectorStatusBadge = document.getElementById('inspectorStatusBadge');
 const inspectObjective = document.getElementById('inspectObjective');
 const inspectInput = document.getElementById('inspectInput');
+const caseCustomBadge = document.getElementById('caseCustomBadge');
+const btnResetInput = document.getElementById('btnResetInput');
 const inspectConfidenceBox = document.getElementById('inspectConfidenceBox');
 const inspectTokenTable = document.getElementById('inspectTokenTable');
 const inspectOutput = document.getElementById('inspectOutput');
@@ -119,6 +121,54 @@ function bindEvents() {
 
   // 執行測試流程
   btnExecutePlan.addEventListener('click', executeTestFlow);
+
+  // 測案 Query / Input 編輯即時監聽與雙向綁定
+  inspectInput.addEventListener('input', () => {
+    const activeCase = state.currentCases.find(c => c.id === state.selectedCaseId);
+    if (!activeCase) return;
+
+    if (!activeCase.defaultInput) {
+      activeCase.defaultInput = activeCase.input;
+    }
+    activeCase.input = inspectInput.value;
+    activeCase.isCustom = inspectInput.value !== activeCase.defaultInput;
+
+    updateCustomInputStatus(activeCase);
+  });
+
+  // 還原預設 Query 按鈕
+  btnResetInput.addEventListener('click', () => {
+    const activeCase = state.currentCases.find(c => c.id === state.selectedCaseId);
+    if (!activeCase || !activeCase.defaultInput) return;
+
+    activeCase.input = activeCase.defaultInput;
+    inspectInput.value = activeCase.defaultInput;
+    activeCase.isCustom = false;
+
+    updateCustomInputStatus(activeCase);
+  });
+}
+
+function updateCustomInputStatus(activeCase) {
+  const isCustom = !!activeCase.isCustom;
+  caseCustomBadge.classList.toggle('hidden', !isCustom);
+  btnResetInput.classList.toggle('hidden', !isCustom);
+
+  // 同步更新左側卡片上的標籤或提示
+  const leftCard = document.querySelector(`.case-item-card[data-case-id="${activeCase.id}"]`);
+  if (leftCard) {
+    let customTag = leftCard.querySelector('.custom-badge-tag');
+    if (isCustom) {
+      if (!customTag) {
+        customTag = document.createElement('span');
+        customTag.className = 'custom-badge-tag badge badge-accent';
+        customTag.textContent = '已自訂';
+        leftCard.querySelector('.case-item-top').appendChild(customTag);
+      }
+    } else if (customTag) {
+      customTag.remove();
+    }
+  }
 }
 
 // 2. 模式視圖切換
@@ -467,6 +517,14 @@ async function executeTestFlow() {
     if (state.activeMode === 'skill-eval') {
       endpoint = '/api/run/skill-eval';
       payload.skillPath = state.selectedSkill?.path;
+      // 包含使用者自訂編輯之測案以進行深度測試
+      payload.cases = state.currentCases.map(c => ({
+        id: c.id,
+        name: c.name,
+        type: c.type,
+        input: c.input,
+        expectedTrigger: c.expected?.includes('>= 35%') || c.type?.includes('正向')
+      }));
     } else if (state.activeMode === 'harness-eval') {
       endpoint = '/api/run/harness-eval';
       payload.harnessScript = 'npm run harness:check';
@@ -539,7 +597,12 @@ function inspectCaseDetail(c) {
     ${c.expected ? `<div style="margin-top: 0.35rem; font-size: 0.76rem; color: #a5f3fc;"><strong>預期反應 (Expected)：</strong>${c.expected}</div>` : ''}
   `;
 
-  inspectInput.textContent = c.input || '無特定輸入刺激';
+  // 設置可編輯的輸入框數值
+  inspectInput.value = c.input || '';
+  if (!c.defaultInput) {
+    c.defaultInput = c.input;
+  }
+  updateCustomInputStatus(c);
 
   // 信心指數解析
   const conf = c.confidenceDetails || {};
