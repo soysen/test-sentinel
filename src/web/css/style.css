@@ -349,12 +349,12 @@ body {
   color: #93c5fd;
 }
 
-/* 概念解析卡片 Concept Explanation */
+/* 概念解析卡片 Concept Explanation (側邊欄垂直列表模式) */
 .concept-explanation-card {
   background-color: rgba(30, 41, 59, 0.5);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  padding: 0.65rem 1rem;
+  padding: 0.65rem 0.85rem;
 }
 
 .concept-header {
@@ -370,7 +370,7 @@ body {
   border: none;
   color: var(--accent-cyan);
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   text-decoration: underline;
   margin-left: auto;
 }
@@ -381,31 +381,62 @@ body {
   border-top: 1px dashed rgba(255, 255, 255, 0.08);
 }
 
-.concept-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
+.concept-v-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
 }
 
 .concept-box {
   background-color: var(--bg-dark);
   border: 1px solid var(--border-color);
   border-radius: 6px;
-  padding: 0.65rem 0.85rem;
+  padding: 0.55rem 0.75rem;
 }
 
 .concept-term {
   display: block;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 700;
   color: var(--accent-cyan);
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.2rem;
 }
 
 .concept-box p {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: #94a3b8;
-  line-height: 1.4;
+  line-height: 1.35;
+}
+
+/* 合併卡片：指令列與管線流程 (Unified Flow Card) */
+.unified-flow-card {
+  padding: 1rem 1.25rem;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.unified-flow-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.unified-flow-bottom {
+  margin-top: 0.75rem;
+}
+
+.flow-header-mini {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #94a3b8;
 }
 
 /* Function Flow 流程畫布 */
@@ -440,7 +471,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.5rem 0;
+  padding: 0.35rem 0;
   overflow-x: auto;
 }
 
@@ -500,80 +531,114 @@ body {
   margin: 0 0.5rem;
 }
 
-/* 互動測案區塊網格 Case Blocks Grid */
-.case-blocks-grid {
+/* Master-Detail 容器佈局 */
+.master-detail-container {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
+  grid-template-columns: 380px 1fr;
+  gap: 1.25rem;
+  align-items: start;
 }
 
-.case-block-card {
+.case-master-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.case-master-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+/* 測案由上往下排列的卡片 Case List Item */
+.case-item-card {
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   border-left: 4px solid var(--accent-cyan);
   border-radius: 8px;
-  padding: 1rem;
+  padding: 0.85rem 1rem;
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
 }
 
-.case-block-card:hover {
-  transform: translateY(-2px);
+.case-item-card:hover {
+  background-color: var(--bg-hover);
   border-color: var(--accent-cyan);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transform: translateX(3px);
 }
 
-.case-block-card.selected {
+.case-item-card.selected {
   border-left-color: var(--accent-emerald);
-  background-color: rgba(6, 182, 212, 0.08);
+  background-color: rgba(6, 182, 212, 0.12);
   box-shadow: 0 0 0 1px var(--accent-cyan);
 }
 
-.case-block-card.status-fail {
+.case-item-card.status-fail {
   border-left-color: var(--accent-rose);
 }
 
-.block-header {
+.case-item-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.5rem;
-}
-
-.block-id {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 0.78rem;
-  color: var(--accent-cyan);
-}
-
-.block-title {
-  font-size: 0.85rem;
-  font-weight: 600;
   margin-bottom: 0.35rem;
 }
 
-.block-objective {
-  font-size: 0.75rem;
-  color: #cbd5e1;
-  line-height: 1.35;
-  margin-bottom: 0.75rem;
+.case-item-id {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.76rem;
+  color: var(--accent-cyan);
 }
 
-.block-footer {
+.case-item-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.3rem;
+}
+
+.case-item-obj {
+  font-size: 0.73rem;
+  color: #94a3b8;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.case-item-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-top: 0.5rem;
+  margin-top: 0.5rem;
+  padding-top: 0.4rem;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
 }
 
-.block-click-hint {
-  color: var(--accent-cyan);
-  font-size: 0.72rem;
+/* 右側測案細節檢視 (Sticky Inspector) */
+.case-detail-column {
+  position: sticky;
+  top: 4.5rem;
+}
+
+.meta-callout-primary {
+  background: rgba(6, 182, 212, 0.08);
+  border-left: 3px solid var(--accent-cyan);
+  padding: 0.65rem 0.85rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  color: #e2e8f0;
+  line-height: 1.45;
+}
+
+.btn-block {
+  width: 100%;
 }
 
 /* 個別測案詳細資訊檢視器 Case Detail Inspector */

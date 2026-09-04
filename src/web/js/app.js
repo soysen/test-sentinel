@@ -39,13 +39,14 @@ const flowStatusBadge = document.getElementById('flowStatusBadge');
 const functionFlowContainer = document.getElementById('functionFlowContainer');
 const casesSection = document.getElementById('casesSection');
 const casesCountBadge = document.getElementById('casesCountBadge');
-const caseBlocksGrid = document.getElementById('caseBlocksGrid');
+const caseMasterList = document.getElementById('caseMasterList');
 const btnExecutePlan = document.getElementById('btnExecutePlan');
 
 // 測案詳細檢視器 (Inspector)
-const caseInspectorModal = document.getElementById('caseInspectorModal');
+const caseInspectorCard = document.getElementById('caseInspectorCard');
 const inspectorCaseTitle = document.getElementById('inspectorCaseTitle');
-const closeInspectorBtn = document.getElementById('closeInspectorBtn');
+const inspectorStatusBadge = document.getElementById('inspectorStatusBadge');
+const inspectObjective = document.getElementById('inspectObjective');
 const inspectInput = document.getElementById('inspectInput');
 const inspectConfidenceBox = document.getElementById('inspectConfidenceBox');
 const inspectTokenTable = document.getElementById('inspectTokenTable');
@@ -117,12 +118,6 @@ function bindEvents() {
 
   // 執行測試流程
   btnExecutePlan.addEventListener('click', executeTestFlow);
-
-  // 關閉詳細檢視器
-  closeInspectorBtn.addEventListener('click', () => {
-    caseInspectorModal.classList.add('hidden');
-    document.querySelectorAll('.case-block-card').forEach(c => c.classList.remove('selected'));
-  });
 }
 
 // 2. 模式視圖切換
@@ -143,7 +138,6 @@ function updateModeView() {
 
   // 重設執行狀態
   casesSection.classList.add('hidden');
-  caseInspectorModal.classList.add('hidden');
   scorecardSection.classList.add('hidden');
   flowStatusBadge.textContent = '尚未啟動';
   flowStatusBadge.className = 'badge badge-neutral';
@@ -394,13 +388,17 @@ async function generateFlowAndCases() {
     ];
     renderFlowTrack(steps, 2);
 
-    // 渲染互動測案區塊
+    // 渲染互動測案區塊 (由上往下排列)
     renderCaseBlocks(state.currentCases);
     casesCountBadge.textContent = `${state.currentCases.length} 個測案`;
 
+    // 預設選取並呈現第一個測案之細節
+    if (state.currentCases.length > 0) {
+      inspectCaseDetail(state.currentCases[0]);
+    }
+
     casesSection.classList.remove('hidden');
     scorecardSection.classList.add('hidden');
-    caseInspectorModal.classList.add('hidden');
 
     casesSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
@@ -417,25 +415,25 @@ async function generateFlowAndCases() {
 }
 
 function renderCaseBlocks(cases) {
-  caseBlocksGrid.innerHTML = cases.map(c => `
-    <div class="case-block-card ${c.status === 'FAIL' ? 'status-fail' : ''} ${state.selectedCaseId === c.id ? 'selected' : ''}" data-case-id="${c.id}">
-      <div class="block-header">
-        <span class="block-id">${c.id}</span>
+  caseMasterList.innerHTML = cases.map(c => `
+    <div class="case-item-card ${c.status === 'FAIL' ? 'status-fail' : ''} ${state.selectedCaseId === c.id ? 'selected' : ''}" data-case-id="${c.id}">
+      <div class="case-item-top">
+        <span class="case-item-id">${c.id}</span>
         <span class="badge ${c.status === 'FAIL' ? 'badge-danger' : c.status === 'PASS' ? 'badge-success' : 'badge-neutral'}">
           ${c.status || '待執行'}
         </span>
       </div>
-      <div class="block-title">${c.name}</div>
-      <div class="block-objective">🎯 <strong>目的：</strong>${c.objective || c.delta || '驗證邊界反應'}</div>
-      <div class="block-footer">
+      <div class="case-item-title">${c.name}</div>
+      <div class="case-item-obj"><strong>檢測目標：</strong>${c.objective || c.delta || '驗證邊界反應與回傳規格'}</div>
+      <div class="case-item-meta">
         <span>${c.type}</span>
-        <span class="block-click-hint">點擊檢視細節與產出 &rarr;</span>
+        <span style="color: var(--accent-cyan);">檢視細節 &rarr;</span>
       </div>
     </div>
   `).join('');
 
-  // 點選卡片開啟 Inspector
-  caseBlocksGrid.querySelectorAll('.case-block-card').forEach(card => {
+  // 點選左側卡片切換右側細節
+  caseMasterList.querySelectorAll('.case-item-card').forEach(card => {
     card.addEventListener('click', () => {
       const caseId = card.dataset.caseId;
       const targetCase = state.currentCases.find(item => item.id === caseId);
@@ -499,9 +497,10 @@ async function executeTestFlow() {
     // 渲染計分卡
     renderScorecard(runResult);
 
-    // 自動預設展開第一個測案的細節檢視
-    if (state.currentCases.length > 0) {
-      inspectCaseDetail(state.currentCases[0]);
+    // 刷新目前選中測案之細節 (若有) 或預設第一個
+    const activeCase = state.currentCases.find(c => c.id === state.selectedCaseId) || state.currentCases[0];
+    if (activeCase) {
+      inspectCaseDetail(activeCase);
     }
 
     scorecardSection.classList.remove('hidden');
@@ -519,17 +518,25 @@ async function executeTestFlow() {
   }
 }
 
-// 7. 個別測案詳細資訊檢視器 (點選 Block 顯示細節)
+// 7. 個別測案詳細資訊檢視器 (點選左側卡片，右側顯示細節)
 function inspectCaseDetail(c) {
   state.selectedCaseId = c.id;
 
-  // 高亮目前選取的卡片
-  document.querySelectorAll('.case-block-card').forEach(card => {
+  // 高亮左側選取的卡片
+  document.querySelectorAll('.case-item-card').forEach(card => {
     card.classList.toggle('selected', card.dataset.caseId === c.id);
   });
 
   inspectorCaseTitle.textContent = `${c.id}：${c.name}`;
-  inspectInput.textContent = c.input || '無特定輸入';
+  inspectorStatusBadge.textContent = c.status || '待執行';
+  inspectorStatusBadge.className = `badge ${c.status === 'FAIL' ? 'badge-danger' : c.status === 'PASS' ? 'badge-success' : 'badge-neutral'}`;
+
+  inspectObjective.innerHTML = `
+    <strong>檢測目的：</strong>${c.objective || c.delta || '驗證邊界輸入之模型決策與反應行為。'}
+    ${c.expected ? `<div style="margin-top: 0.35rem; font-size: 0.76rem; color: #a5f3fc;"><strong>預期反應 (Expected)：</strong>${c.expected}</div>` : ''}
+  `;
+
+  inspectInput.textContent = c.input || '無特定輸入刺激';
 
   // 信心指數解析
   const conf = c.confidenceDetails || {};
@@ -544,7 +551,7 @@ function inspectCaseDetail(c) {
   const token = c.tokenBreakdown || { promptTokens: 380, completionTokens: 120, totalTokens: 500, latencyMs: 350 };
   inspectTokenTable.innerHTML = `
     <div class="token-stat-row">
-      <span>輸入 Prompt Tokens (含 Skill Context):</span>
+      <span>輸入 Prompt Tokens (含 Context):</span>
       <code>${token.promptTokens} tokens</code>
     </div>
     <div class="token-stat-row">
@@ -576,9 +583,6 @@ function inspectCaseDetail(c) {
       ${quality.summary}
     </div>
   `;
-
-  caseInspectorModal.classList.remove('hidden');
-  caseInspectorModal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // 8. 計分卡渲染
