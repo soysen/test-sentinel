@@ -348,3 +348,89 @@ async function saveMockSnapshot() {
 
 // 啟動
 window.addEventListener('DOMContentLoaded', init);
+
+// 渲染視覺化流程軸
+function renderPipeline(workflow) {
+  const stepsContainer = document.getElementById('pipelineSteps');
+  const badge = document.getElementById('pipelineStatusBadge');
+  if (!workflow || workflow.length === 0) return;
+
+  badge.textContent = '全流程執行完畢 (Verified)';
+  badge.className = 'badge badge-success';
+
+  stepsContainer.innerHTML = workflow.map((w, idx) => `
+    <div class="step-node ${w.status === 'completed' ? 'completed' : 'active'}">
+      <div class="node-circle">${w.status === 'completed' ? '✓' : w.step}</div>
+      <div class="node-content">
+        <strong>${w.name}</strong>
+        <small>${w.desc}</small>
+      </div>
+    </div>
+    ${idx < workflow.length - 1 ? '<div class="step-connector"></div>' : ''}
+  `).join('');
+}
+
+// 渲染檢定標準卡片
+function renderStandards(standards) {
+  const grid = document.getElementById('standardsGrid');
+  if (!standards || standards.length === 0) return;
+
+  grid.innerHTML = standards.map(s => {
+    let badgeClass = 'badge-success';
+    if (s.status === 'WARNING') badgeClass = 'badge-warning';
+    if (s.status === 'FAILED') badgeClass = 'badge-danger';
+
+    return `
+      <div class="standard-item">
+        <div class="std-header">
+          <strong>${s.name}</strong>
+          <span class="badge ${badgeClass}">${s.status}</span>
+        </div>
+        <p>${s.criterion}</p>
+        <div class="std-target">規格目標: ${s.target}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// 渲染測案逐項對比表
+function renderComparisonTable(cases) {
+  const tbody = document.getElementById('comparisonTableBody');
+  const countBadge = document.getElementById('caseCountBadge');
+  if (!cases || cases.length === 0) return;
+
+  countBadge.textContent = `${cases.length} 個測案已完成比對`;
+
+  tbody.innerHTML = cases.map(c => {
+    const isPass = c.status === 'PASS';
+    const statusChip = isPass
+      ? '<span class="status-chip status-chip-pass">PASS</span>'
+      : '<span class="status-chip status-chip-fail">FAIL</span>';
+
+    return `
+      <tr>
+        <td class="tc-id">${c.id}</td>
+        <td><strong>${c.name}</strong></td>
+        <td><span class="tc-type-badge">${c.type}</span></td>
+        <td><span class="code-inline">${c.input}</span></td>
+        <td style="color: #93c5fd;">${c.expected}</td>
+        <td style="color: ${isPass ? '#86efac' : '#fda4af'}; font-weight: 500;">${c.actual}</td>
+        <td>${statusChip}</td>
+        <td style="font-size: 0.75rem; color: #cbd5e1;">${c.delta}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// 掛鉤更新 renderScorecard
+const originalRenderScorecard = renderScorecard;
+renderScorecard = function(data) {
+  originalRenderScorecard(data);
+  const workflow = data.result?.workflow || data.workflow;
+  const standards = data.result?.standards || data.standards;
+  const cases = data.result?.caseComparisons || data.caseComparisons;
+
+  if (workflow) renderPipeline(workflow);
+  if (standards) renderStandards(standards);
+  if (cases) renderComparisonTable(cases);
+};

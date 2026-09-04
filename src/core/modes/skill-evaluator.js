@@ -1,9 +1,5 @@
 /**
  * skill-evaluator.js - [模式 B] Skill 效益評測與 Prompt 負載健檢真實引擎
- * 1. Prompt 語意結構與 Token 負載審查 (Context Weight & Bloat Analysis)
- * 2. 自動合成「領域內必答題 (In-domain)」與「領域外干擾題 (Distractor)」
- * 3. 意圖觸發度實測 (Empirical Trigger Discrimination: Recall & Precision)
- * 4. 負向邊界 (Negative Guardrails) 防誤調用檢驗
  */
 
 const fs = require('fs');
@@ -32,7 +28,58 @@ class SkillEvaluator {
     // 3. 實施觸發鑑別度實測 (Recall vs Precision)
     const discriminationResult = this.testTriggerDiscrimination(meta, benchmarkSuite);
 
-    // 4. 計算綜合效益評分
+    // 4. 定義測試標準
+    const standards = [
+      {
+        name: '領域召回率標準 (Recall Rate)',
+        criterion: '針對領域內目標操作任務，觸發信心度需 >= 35%，召回率需達 100%',
+        target: 'Recall = 100%',
+        status: discriminationResult.recallRate === 100 ? 'PASSED' : 'FAILED'
+      },
+      {
+        name: '抗干擾精確率標準 (Distractor Precision)',
+        criterion: '面對無關或陷阱問題時，觸發信心度需 < 35%，精確率需達 100%',
+        target: 'Precision = 100%',
+        status: discriminationResult.precisionRate === 100 ? 'PASSED' : 'FAILED'
+      },
+      {
+        name: 'Context Token 負載標準',
+        criterion: 'Skill 說明與指引長度宜控制在 1,500 Tokens 以內，避免沖淡對話 Context',
+        target: 'Tokens <= 1500',
+        status: promptAudit.isBloated ? 'WARNING' : 'PASSED'
+      },
+      {
+        name: 'YAML Frontmatter 結構合規',
+        criterion: '必須包含合法 name 與 description 欄位',
+        target: 'Valid Frontmatter',
+        status: promptAudit.hasValidFrontmatter ? 'PASSED' : 'FAILED'
+      }
+    ];
+
+    // 5. 視覺化流程步驟
+    const workflow = [
+      { step: 1, name: 'Prompt 結構與權重體檢', desc: '解析 Frontmatter 並審查 Token 負載量', status: 'completed' },
+      { step: 2, name: '基準題庫語意合成', desc: '生成 2 道領域必答題與 2 道抗干擾題目', status: 'completed' },
+      { step: 3, name: '特徵特徵向量意圖匹配', desc: '計算 Query 與 Skill 關鍵字權重信心度', status: 'completed' },
+      { step: 4, name: '矩陣比對與效益打分', desc: '核算召回率、精確率與 Token 節省比', status: 'completed' }
+    ];
+
+    // 6. 測案逐項結果對比表 (Expected vs Actual)
+    const caseComparisons = discriminationResult.cases.map(c => {
+      const isExpectedTrigger = c.expectedTrigger;
+      return {
+        id: `SKILL-TC-0${c.id}`,
+        name: c.type === 'in-domain' ? '領域內任務意圖召回測試' : '領域外干擾問題抑制測試',
+        type: c.type === 'in-domain' ? '正向觸發 (In-Domain)' : '負向干擾 (Distractor)',
+        input: c.query,
+        expected: isExpectedTrigger ? '自動啟動 Skill (信心度 >= 35%)' : '保持沉默 (信心度 < 35%)',
+        actual: c.triggered ? `觸發 Skill (實測信心度 ${c.confidence})` : `保持沉默 (實測信心度 ${c.confidence})`,
+        status: c.passed ? 'PASS' : 'FAIL',
+        delta: c.passed ? `完全吻合 (差異度 0%)` : `出現誤判 (實測與預期相反)`
+      };
+    });
+
+    // 計算綜合效益評分
     const score = this.computeSkillScore(promptAudit, discriminationResult);
 
     const suggestions = [];
@@ -51,8 +98,10 @@ class SkillEvaluator {
       skillName: meta.name || path.basename(path.dirname(fullPath)),
       path: path.relative(this.projectPath, fullPath),
       description: meta.description,
+      standards,
+      workflow,
+      caseComparisons,
       promptAudit,
-      benchmarkCases: discriminationResult.cases,
       metrics: {
         recallRate: discriminationResult.recallRate,
         precisionRate: discriminationResult.precisionRate,
@@ -82,7 +131,6 @@ class SkillEvaluator {
       if (titleMatch) name = titleMatch[1].trim();
     }
 
-    // 檢查是否有負向觸發約束
     const hasNegativeTriggers = /not\s+(?:use|trigger|apply)|do\s+not|never|avoid|except|排除|不要在/i.test(description + content.slice(0, 800));
 
     return {
@@ -94,7 +142,6 @@ class SkillEvaluator {
   }
 
   auditPromptWeight(content, meta) {
-    // 粗估 Token 數：英文約 4 字元/Token，中文約 1.5 字元/Token
     const estimatedTokens = Math.round(content.length / 3.5);
     const isBloated = estimatedTokens > 1500;
 
@@ -111,7 +158,6 @@ class SkillEvaluator {
     const skillName = meta.name || 'Current Skill';
     const desc = meta.description || '';
 
-    // 從 description 提取核心動作詞彙與名詞
     const words = desc.split(/\s+/).filter(w => w.length > 3 && !['when', 'user', 'needs', 'this', 'that', 'with', 'from'].includes(w.toLowerCase()));
     const keyAction = words.slice(0, 3).join(' ') || skillName;
 
@@ -144,7 +190,6 @@ class SkillEvaluator {
   }
 
   testTriggerDiscrimination(meta, suite) {
-    // 提取 Skill 的關鍵詞向量特徵
     const descText = (meta.name + ' ' + meta.description).toLowerCase();
     const keywords = descText
       .replace(/[^a-z0-9\s_-]/g, ' ')
@@ -158,7 +203,6 @@ class SkillEvaluator {
 
     const evaluatedCases = suite.map(tc => {
       const queryLower = tc.query.toLowerCase();
-      // 計算關鍵詞匹配度 (Overlap Score)
       const hitCount = keywords.filter(k => queryLower.includes(k)).length;
       const confidence = Math.min(1.0, (hitCount / Math.max(1, Math.min(4, keywords.length))) + (queryLower.includes(meta.name.toLowerCase()) ? 0.6 : 0));
       const simulatedTrigger = confidence >= 0.35;

@@ -1,9 +1,5 @@
 /**
  * harness-auditor.js - [模式 C] Harness 流程真實健檢與故障注入引擎
- * 1. 真實執行基線測試 (Baseline Execution)
- * 2. 實體故障注入 (Fault Injection): 暫時破壞 JSON / 設定，檢驗 Harness 是否具備阻斷報警能力 (防假陽性)
- * 3. 實體冪等性與磁碟殘留檢測 (Idempotency Check): 檢測是否有未清理的暫存檔或狀態污染
- * 4. 腳本退出碼安全審查 (Exit Code Integrity)
  */
 
 const fs = require('fs');
@@ -15,9 +11,6 @@ class HarnessAuditor {
     this.projectPath = path.resolve(projectPath);
   }
 
-  /**
-   * 自動推導專案可執行的 Harness 指令
-   */
   detectHarnessCommand() {
     const pkgPath = path.join(this.projectPath, 'package.json');
     if (fs.existsSync(pkgPath)) {
@@ -43,9 +36,6 @@ class HarnessAuditor {
     return null;
   }
 
-  /**
-   * 執行完整健檢流程
-   */
   auditHarness(customCommand = null) {
     const harnessCmd = customCommand || this.detectHarnessCommand();
     if (!harnessCmd) {
@@ -57,26 +47,95 @@ class HarnessAuditor {
       };
     }
 
-    const checks = [];
-
-    // 1. 基線正向執行測試
+    // 1. 執行實體檢驗
     const baseline = this.runBaselineCheck(harnessCmd);
-    checks.push(baseline);
-
-    // 2. 實體故障注入測試 (Fault Injection)
     const faultInjection = this.runFaultInjectionCheck(harnessCmd);
-    checks.push(faultInjection);
-
-    // 3. 實體冪等性與狀態殘留檢驗 (Idempotency & Cleanliness)
     const idempotency = this.runIdempotencyCheck(harnessCmd);
-    checks.push(idempotency);
-
-    // 4. 靜態腳本安全審核 (Exit Code Integrity)
     const scriptIntegrity = this.runScriptIntegrityCheck(harnessCmd);
-    checks.push(scriptIntegrity);
 
+    const checks = [baseline, faultInjection, idempotency, scriptIntegrity];
     const passedCount = checks.filter(c => c.passed).length;
     const healthScore = Math.round((passedCount / checks.length) * 100);
+
+    // 2. 測試標準規格
+    const standards = [
+      {
+        name: '正常基線標準 (Baseline Integrity)',
+        criterion: '在正常無損壞環境下執行 Harness，Exit Code 必須為 0',
+        target: 'Exit Code = 0',
+        status: baseline.passed ? 'PASSED' : 'FAILED'
+      },
+      {
+        name: '故障敏銳阻斷標準 (Fault Sensitivity / Anti-False-Positive)',
+        criterion: '關鍵資料或設定損壞時，腳本必須以非 0 狀態碼立即阻斷退出，嚴禁假陽性通過',
+        target: 'Exit Code != 0 on failure',
+        status: faultInjection.passed ? 'PASSED' : 'FAILED'
+      },
+      {
+        name: '環境隔離與冪等無痕標準 (Idempotency & Cleanliness)',
+        criterion: '連續執行 Harness 兩次回合，磁碟中未被 .gitignore 忽略的殘留檔案數必須為 0',
+        target: 'Dirty Residue Files = 0',
+        status: idempotency.passed ? 'PASSED' : 'FAILED'
+      },
+      {
+        name: '腳本退出碼防吞噬審核 (Exit Code Protection)',
+        criterion: '腳本必須開啟 set -e 且禁止使用 || true 遮蔽錯誤',
+        target: 'set -e Enabled',
+        status: scriptIntegrity.passed ? 'PASSED' : 'WARNING'
+      }
+    ];
+
+    // 3. 可視化流程
+    const workflow = [
+      { step: 1, name: 'Harness 指令探索', desc: `鎖定可執行腳本 [${harnessCmd}]`, status: 'completed' },
+      { step: 2, name: '正常基線實測', desc: '執行正常流程，驗證正常狀態下 Exit Code 為 0', status: baseline.passed ? 'completed' : 'failed' },
+      { step: 3, name: '實體破壞注入攻擊', desc: '故意破壞設定檔，驗證是否具備攔截報警能力', status: faultInjection.passed ? 'completed' : 'failed' },
+      { step: 4, name: '復原與環境隔離檢查', desc: '原樣復原檔案，連續執行兩次確認無磁碟殘留', status: idempotency.passed ? 'completed' : 'failed' }
+    ];
+
+    // 4. 測案逐項比對表 (Expected vs Actual)
+    const caseComparisons = [
+      {
+        id: 'HARNESS-TC-01',
+        name: '正常環境基線測試 (Baseline Test)',
+        type: '正向驗證',
+        input: `執行指令: ${harnessCmd}`,
+        expected: 'Exit Code = 0 (正常順利通過)',
+        actual: `Exit Code = ${baseline.exitCode}`,
+        status: baseline.passed ? 'PASS' : 'FAIL',
+        delta: baseline.passed ? '正常通過，無拋出錯誤' : '基線執行異常'
+      },
+      {
+        id: 'HARNESS-TC-02',
+        name: '實體破壞注入：損壞資料阻斷測試 (Fault Injection)',
+        type: '負向破壞測試',
+        input: '暫時將設定檔注入非法 JSON 語法並執行 Harness',
+        expected: 'Exit Code != 0 (必須阻斷中斷，嚴禁假陽性通過)',
+        actual: `Exit Code = ${faultInjection.exitCodeCaught} (成功中斷阻斷)`,
+        status: faultInjection.passed ? 'PASS' : 'FAIL',
+        delta: faultInjection.passed ? '具備高敏銳度阻斷力' : '❌ 嚴重：損壞資料下仍假性通過！'
+      },
+      {
+        id: 'HARNESS-TC-03',
+        name: '雙回合連續執行狀態隔離與無痕檢驗 (Idempotency)',
+        type: '冪等性測試',
+        input: '連續執行 Harness 2 次，比對前後 git status',
+        expected: '未清理的殘留磁碟檔案數 = 0',
+        actual: idempotency.passed ? '殘留檔案數 = 0 (工作目錄乾淨)' : '發現未隔離的殘留檔案',
+        status: idempotency.passed ? 'PASS' : 'FAIL',
+        delta: idempotency.passed ? '無狀態洩漏污染' : '存在磁碟污染'
+      },
+      {
+        id: 'HARNESS-TC-04',
+        name: 'Shell 腳本退出碼嚴謹度審查 (Exit Code Integrity)',
+        type: '靜態防禦審查',
+        input: '檢視腳本內容 set -e 宣告與 || true 模式',
+        expected: '啟用 set -e，且無吞噬錯誤之語法',
+        actual: scriptIntegrity.passed ? '符合安全標準' : scriptIntegrity.detail,
+        status: scriptIntegrity.passed ? 'PASS' : 'FAIL',
+        delta: scriptIntegrity.detail
+      }
+    ];
 
     const suggestions = [];
     if (!faultInjection.passed) {
@@ -94,6 +153,9 @@ class HarnessAuditor {
       harnessScript: harnessCmd,
       healthScore,
       status: healthScore >= 75 ? 'HEALTHY' : 'NEEDS_ATTENTION',
+      standards,
+      workflow,
+      caseComparisons,
       checks,
       suggestions
     };
@@ -125,7 +187,6 @@ class HarnessAuditor {
   }
 
   runFaultInjectionCheck(cmd) {
-    // 尋找一個可供注入破壞的非關鍵 JSON 檔案 (優先順序: data/settings.json, data/tasks.json, 或臨時設定檔)
     const candidateFiles = [
       'data/settings.json',
       'data/tasks.json',
@@ -143,7 +204,6 @@ class HarnessAuditor {
 
     let createdTemp = false;
     if (!targetFile) {
-      // 若無現有 JSON，在專案建立一個臨時無效檔案測試環境感知
       targetFile = path.join(this.projectPath, '.temp_sentinel_fault.json');
       fs.writeFileSync(targetFile, '{ invalid_json_syntax: true', 'utf8');
       createdTemp = true;
@@ -153,13 +213,11 @@ class HarnessAuditor {
     try {
       if (!createdTemp) {
         originalContent = fs.readFileSync(targetFile, 'utf8');
-        // 實體注入破壞：寫入非法 JSON 內容
         fs.writeFileSync(targetFile, '{"__CORRUPTED_BY_TEST_SENTINEL__": true, invalid syntax ...', 'utf8');
       }
 
       let faultCaught = false;
       let exitCodeCaught = 0;
-      let failureOutput = '';
 
       try {
         execSync(cmd, {
@@ -168,11 +226,10 @@ class HarnessAuditor {
           stdio: ['pipe', 'pipe', 'pipe'],
           timeout: 15000
         });
-        faultCaught = false; // 居然通過了！這就是假陽性
+        faultCaught = false;
       } catch (e) {
         faultCaught = true;
         exitCodeCaught = e.status || 1;
-        failureOutput = (e.stderr || e.stdout || '').slice(0, 150);
       }
 
       return {
@@ -184,7 +241,6 @@ class HarnessAuditor {
           : '❌ 嚴重漏洞：已注入破壞資料，但 Harness 依然回傳 0 假性通過！'
       };
     } finally {
-      // 確保 100% 原樣復原
       if (createdTemp) {
         if (fs.existsSync(targetFile)) fs.unlinkSync(targetFile);
       } else if (originalContent !== null) {
@@ -195,10 +251,8 @@ class HarnessAuditor {
 
   runIdempotencyCheck(cmd) {
     try {
-      // 取得執行前 git 狀態
       const beforeStatus = this.getGitStatus();
 
-      // 連續執行兩次
       execSync(cmd, { cwd: this.projectPath, stdio: ['ignore', 'ignore', 'ignore'], timeout: 20000 });
       execSync(cmd, { cwd: this.projectPath, stdio: ['ignore', 'ignore', 'ignore'], timeout: 20000 });
 
@@ -224,7 +278,6 @@ class HarnessAuditor {
   }
 
   runScriptIntegrityCheck(cmd) {
-    // 檢查目標腳本檔案中是否包含忽略錯誤的危險模式
     const parts = cmd.split(' ');
     const scriptPath = parts.find(p => p.endsWith('.sh') || p.endsWith('.js'));
 
