@@ -621,10 +621,9 @@ body {
   color: var(--text-muted);
 }
 
-/* 右側測案細節檢視 (Sticky Inspector) */
+/* 右側測案細節檢視 (Detail Inspector - 不用 sticky) */
 .case-detail-column {
-  position: sticky;
-  top: 4.5rem;
+  /* non-sticky */
 }
 
 .meta-callout-primary {
@@ -830,14 +829,24 @@ body {
   margin-bottom: 0.65rem;
 }
 
+.action-trigger-wrapper {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
 .action-trigger-box {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 2rem;
+  width: 100%;
+  max-width: 860px;
   background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(6, 182, 212, 0.1));
   border: 1px solid rgba(16, 185, 129, 0.3);
-  padding: 1.15rem 1.4rem;
+  padding: 1.15rem 1.6rem;
   border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
 }
 
 .trigger-desc strong {

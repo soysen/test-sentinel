@@ -198,23 +198,9 @@
               <div id="caseMasterList" class="case-master-list">
                 <!-- 測案卡片垂直由上往下排列動態生成 -->
               </div>
-
-              <!-- 批准執行控制區 -->
-              <div class="action-trigger-box mt-3">
-                <div class="trigger-desc">
-                  <strong>已確認上述測案與目的？</strong>
-                  <small>點擊啟動實體測試，量測 Token 並比對產出品質。</small>
-                </div>
-                <button id="btnExecutePlan" class="btn btn-success btn-block mt-2">
-                  <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polygon points="5 3 19 12 5 21 5 3"/>
-                  </svg>
-                  <span>2. 批准測案並開始實體執行</span>
-                </button>
-              </div>
             </div>
 
-            <!-- 右側：測案細節檢視 (Sticky Detail Inspector) -->
+            <!-- 右側：測案細節檢視 (Detail Inspector) -->
             <div class="case-detail-column">
               <div id="caseInspectorCard" class="inspector-card">
                 <div class="inspector-header">
@@ -271,6 +257,22 @@
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- 批准執行控制區：移至 casesSection 外，置中擺放 -->
+        <div id="actionTriggerSection" class="action-trigger-wrapper mt-4 hidden">
+          <div class="action-trigger-box">
+            <div class="trigger-desc">
+              <strong>已確認上述測案與檢核目的？</strong>
+              <small>點擊啟動實體測試，量測 Token 並比對產出品質。</small>
+            </div>
+            <button id="btnExecutePlan" class="btn btn-success btn-lg">
+              <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              <span>2. 批准測案並開始實體執行</span>
+            </button>
           </div>
         </div>
 

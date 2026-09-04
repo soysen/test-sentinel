@@ -40,6 +40,7 @@ const functionFlowContainer = document.getElementById('functionFlowContainer');
 const casesSection = document.getElementById('casesSection');
 const casesCountBadge = document.getElementById('casesCountBadge');
 const caseMasterList = document.getElementById('caseMasterList');
+const actionTriggerSection = document.getElementById('actionTriggerSection');
 const btnExecutePlan = document.getElementById('btnExecutePlan');
 
 // 測案詳細檢視器 (Inspector)
@@ -138,6 +139,7 @@ function updateModeView() {
 
   // 重設執行狀態
   casesSection.classList.add('hidden');
+  actionTriggerSection.classList.add('hidden');
   scorecardSection.classList.add('hidden');
   flowStatusBadge.textContent = '尚未啟動';
   flowStatusBadge.className = 'badge badge-neutral';
@@ -312,7 +314,7 @@ function selectSingleSkill(skill) {
 
   // 重設下層預覽
   casesSection.classList.add('hidden');
-  caseInspectorModal.classList.add('hidden');
+  actionTriggerSection.classList.add('hidden');
   scorecardSection.classList.add('hidden');
 }
 
@@ -398,6 +400,7 @@ async function generateFlowAndCases() {
     }
 
     casesSection.classList.remove('hidden');
+    actionTriggerSection.classList.remove('hidden');
     scorecardSection.classList.add('hidden');
 
     casesSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
