@@ -432,6 +432,28 @@ body {
   border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* 模式 A / C 標題與說明分行顯示 */
+.generic-mode-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  width: 100%;
+}
+
+.generic-mode-header .badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+}
+
+.generic-desc {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+  line-height: 1.4;
+  display: block;
+}
+
 .flow-col-pipeline {
   display: flex;
   flex-direction: column;
