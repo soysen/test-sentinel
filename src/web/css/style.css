@@ -237,8 +237,9 @@ body {
 
 .skill-selector-group {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
   width: 100%;
 }
 
@@ -252,8 +253,7 @@ body {
 /* Autocomplete 下拉選單元件 */
 .autocomplete-wrapper {
   position: relative;
-  flex: 1;
-  max-width: 520px;
+  width: 100%;
 }
 
 .autocomplete-input-box {
@@ -408,35 +408,50 @@ body {
   line-height: 1.35;
 }
 
-/* 合併卡片：指令列與管線流程 (Unified Flow Card) */
+/* 合併卡片：左右欄位佈局 (左：選擇 Skill，右：Function Flow) */
 .unified-flow-card {
-  padding: 1rem 1.25rem;
+  padding: 1.15rem 1.4rem;
   background-color: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 10px;
 }
 
-.unified-flow-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.unified-flow-split {
+  display: grid;
+  grid-template-columns: 340px 1fr;
   gap: 1.5rem;
-  padding-bottom: 0.85rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  align-items: center;
 }
 
-.unified-flow-bottom {
-  margin-top: 0.75rem;
+.flow-col-selector {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.5rem;
+  padding-right: 1.5rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.flow-col-pipeline {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
 }
 
 .flow-header-mini {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
   font-size: 0.82rem;
   font-weight: 600;
   color: #94a3b8;
+}
+
+.selector-action-row {
+  display: flex;
+  width: 100%;
 }
 
 /* Function Flow 流程畫布 */
