@@ -153,7 +153,8 @@
       <section class="main-content">
         
         <!-- 合併：生成測案區塊與執行管線流程區塊 (左右分割佈局) -->
-        <div class="card unified-flow-card">
+        <div class="card unified-flow-card workflow-stage stage-generate">
+          <div class="workflow-stage-label"><span>01</span> 生成測案</div>
           <div class="unified-flow-split">
             <!-- 左欄：選擇要測試的 Skill 與生成測案按鈕 -->
             <div class="flow-col-selector">
@@ -223,9 +224,9 @@
         </div>
 
         <!-- 測案區塊與細節主從介面 (Master-Detail Layout) -->
-        <div id="casesSection" class="mt-4 hidden">
+        <div id="casesSection" class="mt-4 hidden workflow-stage stage-review">
           <div class="section-badge-header">
-            <span class="step-tag">STEP 1</span>
+            <span class="step-tag">STEP 02</span>
             <h3>測案規劃與目的說明 (點選左側測案，右側顯示細節)</h3>
             <span id="casesCountBadge" class="badge badge-accent ml-auto">4 個測案</span>
           </div>
@@ -324,7 +325,7 @@
         </div>
 
         <!-- 批准執行控制區：移至 casesSection 外，置中擺放 -->
-        <div id="actionTriggerSection" class="action-trigger-wrapper mt-4 hidden">
+        <div id="actionTriggerSection" class="action-trigger-wrapper mt-4 hidden workflow-stage stage-execute">
           <div class="action-trigger-box">
             <div id="desktopAgentPromptPanel" class="desktop-agent-prompt hidden">
               <div class="desktop-agent-prompt-header">
@@ -343,6 +344,7 @@
               <textarea id="desktopAgentPromptText" class="desktop-agent-prompt-text" rows="12" readonly spellcheck="false"></textarea>
             </div>
             <div class="trigger-desc">
+              <span class="step-tag">STEP 03</span>
               <strong>已確認上述測案與檢核目的？</strong>
               <small>點擊啟動實體測試，量測 Token 並比對產出品質。</small>
             </div>
@@ -350,15 +352,15 @@
               <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="5 3 19 12 5 21 5 3"/>
               </svg>
-              <span>2. 批准測案並開始實體執行</span>
+              <span>3. 批准測案並開始實體執行</span>
             </button>
           </div>
         </div>
 
         <!-- 第二階段：整體評估結果與品質計分卡 (Step 2: Scorecard) -->
-        <div id="scorecardSection" class="mt-4 hidden">
+        <div id="scorecardSection" class="mt-4 hidden workflow-stage stage-result">
           <div class="section-badge-header">
-            <span class="step-tag step-tag-done">STEP 2</span>
+            <span class="step-tag step-tag-done">STEP 04</span>
             <h3>實測總體評估與品質計分卡</h3>
             <div id="overallScorePill" class="score-pill ml-auto">N/A INCONCLUSIVE</div>
           </div>

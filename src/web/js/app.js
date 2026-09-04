@@ -1437,7 +1437,7 @@ async function executeTestFlow() {
       <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polygon points="5 3 19 12 5 21 5 3"/>
       </svg>
-      <span>2. 批准測案並開始實體執行</span>
+      <span>3. 批准測案並開始實體執行</span>
     `;
   }
 }

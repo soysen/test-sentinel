@@ -27,6 +27,10 @@
   --accent-emerald: #22c55e;
   --accent-amber: #eab308;
   --accent-rose: #ef4444;
+  --stage-generate: #22d3ee;
+  --stage-review: #60a5fa;
+  --stage-execute: #fbbf24;
+  --stage-result: #fb7185;
   --font-sans: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
   --terminal-glow: 0 0 8px rgba(74, 222, 128, 0.4);
@@ -750,6 +754,51 @@ body {
   border-radius: 4px;
   box-shadow: var(--terminal-box-shadow);
   cursor: default;
+}
+
+/* 操作階段色帶：維持 terminal 語言，同時建立清楚的閱讀順序。 */
+.workflow-stage {
+  --stage-color: var(--stage-generate);
+  --stage-tint: rgba(34, 211, 238, 0.09);
+  position: relative;
+  border-left: 4px solid var(--stage-color);
+  background-image: linear-gradient(90deg, var(--stage-tint), transparent 42%);
+}
+
+.stage-review {
+  --stage-color: var(--stage-review);
+  --stage-tint: rgba(96, 165, 250, 0.085);
+}
+
+.stage-execute {
+  --stage-color: var(--stage-execute);
+  --stage-tint: rgba(251, 191, 36, 0.1);
+}
+
+.stage-result {
+  --stage-color: var(--stage-result);
+  --stage-tint: rgba(251, 113, 133, 0.085);
+}
+
+.workflow-stage-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.9rem;
+  color: var(--stage-color);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.workflow-stage-label span {
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  background: #000;
 }
 
 .unified-flow-split {
@@ -1596,6 +1645,13 @@ body {
   box-shadow: 0 0 6px rgba(34, 197, 94, 0.25);
 }
 
+.workflow-stage .step-tag {
+  color: var(--stage-color);
+  border-color: var(--stage-color);
+  background: color-mix(in srgb, var(--stage-color) 10%, #000);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--stage-color) 28%, transparent);
+}
+
 .step-tag-done {
   background-color: var(--border-bright);
   color: #000000;
@@ -1614,6 +1670,10 @@ body {
   cursor: default;
 }
 
+.workflow-stage .section-badge-header {
+  border-bottom-color: color-mix(in srgb, var(--stage-color) 45%, transparent);
+}
+
 .section-badge-header h3 {
   font-size: 1.05rem;
   font-weight: 800;
@@ -1625,8 +1685,10 @@ body {
 
 #casesSection {
   margin-top: 2rem;
-  padding-top: 1.5rem;
-  border-top: 1px dashed var(--border-static-dashed);
+  padding: 1.5rem 1.25rem 1.25rem;
+  border-top: 1px solid color-mix(in srgb, var(--stage-color) 42%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--stage-color) 18%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--stage-color) 18%, transparent);
 }
 
 .action-trigger-wrapper {
@@ -1635,6 +1697,7 @@ body {
   width: 100%;
   margin-top: 2rem;
   margin-bottom: 1rem;
+  padding: 1rem;
 }
 
 /* 觸發執行卡片 (強化階段過渡控制台質感) */
@@ -1646,11 +1709,11 @@ body {
   gap: 2rem;
   width: 100%;
   max-width: 860px;
-  background: linear-gradient(180deg, #041404 0%, #010801 100%);
-  border: 1px solid var(--border-interactive-bright);
+  background: rgba(10, 8, 1, 0.88);
+  border: 1px solid color-mix(in srgb, var(--stage-color) 60%, #000);
   padding: 1.25rem 1.75rem;
   border-radius: 6px;
-  box-shadow: 0 0 18px rgba(34, 197, 94, 0.25);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--stage-color) 18%, transparent);
   cursor: default;
 }
 
@@ -1662,6 +1725,7 @@ body {
   font-family: var(--font-mono);
   text-shadow: var(--terminal-glow);
   cursor: default;
+  margin-top: 0.55rem;
 }
 
 .trigger-desc small {
@@ -1676,8 +1740,10 @@ body {
 
 #scorecardSection {
   margin-top: 2rem;
-  padding-top: 1.5rem;
-  border-top: 1px dashed var(--border-static-dashed);
+  padding: 1.5rem 1.25rem 1.25rem;
+  border-top: 1px solid color-mix(in srgb, var(--stage-color) 42%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--stage-color) 18%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--stage-color) 18%, transparent);
 }
 
 .scorecard-card {
@@ -2219,4 +2285,95 @@ body {
   background-color: rgba(21, 128, 61, 0.2);
   color: var(--text-muted);
   border: 1px solid var(--border-static);
+}
+
+@media (max-width: 1024px) {
+  .top-nav {
+    position: static;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .nav-view-tabs,
+  .sentinel-status {
+    position: static;
+    transform: none;
+    max-width: 100%;
+  }
+
+  .nav-view-tabs {
+    order: 3;
+    width: 100%;
+  }
+
+  .nav-view-tab {
+    flex: 1;
+    justify-content: center;
+    min-width: 0;
+    padding-inline: 0.6rem;
+  }
+
+  .sentinel-status {
+    margin-left: auto;
+  }
+
+  .version-tag {
+    display: none;
+  }
+
+  .dashboard-body {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 1rem;
+  }
+
+  .main-content,
+  .flow-col-pipeline,
+  .case-detail-column {
+    min-width: 0;
+  }
+
+  .unified-flow-card,
+  #casesSection,
+  #scorecardSection {
+    padding: 1rem;
+  }
+
+  .unified-flow-split,
+  .master-detail-container {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .flow-col-selector {
+    padding: 0 0 1rem;
+    border-right: 0;
+    border-bottom: 1px dashed var(--border-static-dashed);
+  }
+
+  .section-badge-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .section-badge-header h3 {
+    flex: 1 1 14rem;
+    overflow-wrap: anywhere;
+  }
+
+  .section-badge-header .ml-auto {
+    margin-left: 0;
+  }
+
+  .action-trigger-wrapper {
+    padding: 0.75rem;
+  }
+
+  .action-trigger-box {
+    gap: 1rem;
+    padding: 1rem;
+  }
+
+  .action-trigger-box .btn {
+    width: 100%;
+  }
 }
