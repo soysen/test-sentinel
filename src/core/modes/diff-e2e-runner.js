@@ -210,6 +210,12 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       actual: `${result.status} (Exit Code: ${result.evidence.exitCode})`,
       status: result.status === 'KILLED' ? 'PASS' : (result.status === 'SURVIVED' ? 'FAIL' : 'INCONCLUSIVE'),
       delta: result.reason,
+      mutation: {
+        filePath: result.mutation.filePath,
+        originalLine: result.mutation.originalLine,
+        mutatedLine: result.mutation.mutatedLine,
+        type: result.mutation.type
+      },
       evidence: result.evidence
     }));
 

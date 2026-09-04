@@ -21,6 +21,7 @@ const { MockErrorHealer } = require('../core/mock-engine/error-healer');
 const { HarMockManager } = require('../core/mock-engine/har-manager');
 const { SkillEvaluator } = require('../core/modes/skill-evaluator');
 const { QualityScorer } = require('../core/scorer');
+const { buildRemediationPlan } = require('../core/remediation-planner');
 const { ProjectWatcher } = require('../core/watcher');
 const { AgentEvalQueue } = require('../core/agent-eval-queue');
 const { runEvaluationWorker } = require('./evaluation-runner');
@@ -292,10 +293,12 @@ const server = http.createServer((req, res) => {
         const historyMgr = new HistoryManager(projectPath || process.cwd());
         const targetName = body.targetFile ? path.basename(body.targetFile) : 'all-diffs';
         const baseline = historyMgr.getLatestBaseline('diff-e2e', targetName);
-        const saved = historyMgr.saveReport('diff-e2e', targetName, { result, scorecard });
-        const diff = historyMgr.computeDiff({ result, scorecard }, baseline);
+        const remediation = buildRemediationPlan({ mode: 'diff-e2e', projectPath, report: { result, scorecard } });
+        const report = { result, scorecard, remediation };
+        const saved = historyMgr.saveReport('diff-e2e', targetName, report);
+        const diff = historyMgr.computeDiff(report, baseline);
 
-        return jsonResponse({ result, scorecard, saved, diff, hasBaseline: !!baseline });
+        return jsonResponse({ ...report, saved, diff, hasBaseline: !!baseline });
       } catch (e) {
         return jsonResponse({ error: e.message }, 500);
       }
@@ -346,6 +349,7 @@ const server = http.createServer((req, res) => {
         }
         targetName = targetName || 'skill';
 
+        report.remediation = buildRemediationPlan({ mode: 'skill-eval', projectPath, report });
         const baseline = historyMgr.getLatestBaseline('skill-eval', targetName);
         const saved = historyMgr.saveReport('skill-eval', targetName, report);
         const diff = historyMgr.computeDiff(report, baseline);
@@ -376,6 +380,7 @@ const server = http.createServer((req, res) => {
         // 儲存至歷史紀錄並計算基準差異
         const historyMgr = new HistoryManager(projectPath || process.cwd());
         const targetName = (report.harnessScript || 'default_harness').replace(/[^a-zA-Z0-9_-]/g, '_');
+        report.remediation = buildRemediationPlan({ mode: 'harness-eval', projectPath, report });
         const baseline = historyMgr.getLatestBaseline('harness-eval', targetName);
         const saved = historyMgr.saveReport('harness-eval', targetName, report);
         const diff = historyMgr.computeDiff(report, baseline);

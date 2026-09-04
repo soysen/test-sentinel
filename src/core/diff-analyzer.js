@@ -107,15 +107,20 @@ class DiffAnalyzer {
    * 找出可以故意改壞以檢驗測試鑑別度的語法點
    */
   findMutationCandidates(lines, filePath) {
+    const extension = path.extname(filePath).toLowerCase();
+    const supportedExtensions = new Set(['.js', '.cjs', '.mjs', '.ts', '.cts', '.mts', '.jsx', '.tsx']);
+    if (!supportedExtensions.has(extension) || !this.isMutableSourceFile(filePath)) return [];
+
     const candidates = [];
     const operatorMap = [
       { pattern: /===/g, replacement: '!==', desc: 'Invert equality (=== to !==)' },
       { pattern: /!==/g, replacement: '===', desc: 'Invert inequality (!== to ===)' },
-      { pattern: /==/g, replacement: '!=', desc: 'Invert loose equality (== to !=)' },
+      { pattern: /(?<![=!])==(?!=)/g, replacement: '!=', desc: 'Invert loose equality (== to !=)' },
+      { pattern: /(?<![=!])!=(?!=)/g, replacement: '==', desc: 'Invert loose inequality (!= to ==)' },
       { pattern: />=/g, replacement: '<', desc: 'Invert comparison (>= to <)' },
       { pattern: /<=/g, replacement: '>', desc: 'Invert comparison (<= to >)' },
-      { pattern: />(?!=)/g, replacement: '<=', desc: 'Invert comparison (> to <=)' },
-      { pattern: /<(?!=)/g, replacement: '>=', desc: 'Invert comparison (< to >=)' },
+      { pattern: /(?<![=>])>(?!=)/g, replacement: '<=', desc: 'Invert comparison (> to <=)' },
+      { pattern: /(?<![=<])<(?!=)/g, replacement: '>=', desc: 'Invert comparison (< to >=)' },
       { pattern: /&&/g, replacement: '||', desc: 'Swap logical AND with OR' },
       { pattern: /\|\|/g, replacement: '&&', desc: 'Swap logical OR with AND' },
       { pattern: /\btrue\b/g, replacement: 'false', desc: 'Flip boolean true to false' },
@@ -126,14 +131,15 @@ class DiffAnalyzer {
       // 忽略註解與空行
       const trimmed = line.trim();
       if (trimmed.startsWith('//') || trimmed.startsWith('/*') || !trimmed) return;
+      const executableLine = this.maskNonCodeSegments(line, extension);
 
       for (const op of operatorMap) {
-        if (op.pattern.test(line)) {
+        for (const match of executableLine.matchAll(op.pattern)) {
           candidates.push({
             filePath,
             lineIndex: index,
             originalLine: line,
-            mutatedLine: line.replace(op.pattern, op.replacement),
+            mutatedLine: `${line.slice(0, match.index)}${op.replacement}${line.slice(match.index + match[0].length)}`,
             type: op.desc
           });
         }
@@ -141,6 +147,53 @@ class DiffAnalyzer {
     });
 
     return candidates;
+  }
+
+  isMutableSourceFile(filePath) {
+    const normalized = filePath.replace(/\\/g, '/');
+    if (/(^|\/)(?:tests?|__tests__|\.test-eval)(\/|$)/i.test(normalized)) return false;
+    if (/\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(normalized)) return false;
+    return !/(^|\/)(?:playwright|vitest|jest|webpack|vite|eslint|babel|rollup)\.config\.[cm]?[jt]s$/i.test(normalized);
+  }
+
+  maskNonCodeSegments(line, extension = '') {
+    const masked = [...line];
+    let quote = null;
+    let escaped = false;
+
+    for (let index = 0; index < line.length; index++) {
+      const char = line[index];
+      const next = line[index + 1];
+
+      if (quote) {
+        masked[index] = ' ';
+        if (escaped) {
+          escaped = false;
+        } else if (char === '\\') {
+          escaped = true;
+        } else if (char === quote) {
+          quote = null;
+        }
+        continue;
+      }
+
+      if (char === '"' || char === "'" || char === '`') {
+        quote = char;
+        masked[index] = ' ';
+        continue;
+      }
+
+      if (char === '/' && (next === '/' || next === '*')) {
+        for (let rest = index; rest < line.length; rest++) masked[rest] = ' ';
+        break;
+      }
+    }
+
+    let executableLine = masked.join('');
+    if (extension === '.jsx' || extension === '.tsx') {
+      executableLine = executableLine.replace(/<\/?[A-Za-z][^>]*>|<\/?\s*>/g, match => ' '.repeat(match.length));
+    }
+    return executableLine;
   }
 }
 

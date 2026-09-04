@@ -17,6 +17,7 @@ const { DiffE2ERunner } = require('../src/core/modes/diff-e2e-runner');
 const { SkillEvaluator } = require('../src/core/modes/skill-evaluator');
 const { HarnessAuditor } = require('../src/core/modes/harness-auditor');
 const { QualityScorer } = require('../src/core/scorer');
+const { buildRemediationPlan } = require('../src/core/remediation-planner');
 const { HistoryManager } = require('../src/core/history-manager');
 const { AgentEvalQueue } = require('../src/core/agent-eval-queue');
 const { getCasesPreview } = require('../src/server/routes/preview');
@@ -35,6 +36,19 @@ console.log('1. Testing ProjectScanner...');
 const scanner = new ProjectScanner(path.resolve(__dirname, '..'));
 const profile = scanner.scan();
 assert(profile.name === 'test-sentinel', 'Scanner should detect project name');
+const mutationAnalyzer = new DiffAnalyzer(path.resolve(__dirname, '..'));
+assert(mutationAnalyzer.findMutationCandidates(['.remediation-header > div {'], 'src/web/css/style.css').length === 0, 'CSS combinators must not become code mutations');
+assert(mutationAnalyzer.findMutationCandidates(['<div class="remediation-header">'], 'src/web/index.html').length === 0, 'HTML tag delimiters must not become code mutations');
+assert(mutationAnalyzer.findMutationCandidates(['if (enabled === true) run();'], 'tests/example.test.js').length === 0, 'Test files must not become mutation targets');
+assert(mutationAnalyzer.findMutationCandidates(['reuseExistingServer: false'], 'playwright.config.js').length === 0, 'Tool configuration must not become a mutation target');
+assert(mutationAnalyzer.findMutationCandidates(['if (enabled === true) run();'], 'src/example.js').length === 2, 'Product source files should remain mutation targets');
+assert(mutationAnalyzer.findMutationCandidates(['const markup = "<div>";'], 'src/web/app.js').length === 0, 'Operators inside strings must not become mutations');
+assert(mutationAnalyzer.findMutationCandidates(['const handler = () => true;'], 'src/web/app.js').length === 1, 'Arrow syntax must not become a comparison mutation');
+assert(mutationAnalyzer.findMutationCandidates(['return <div className="panel">Ready</div>;'], 'src/web/App.jsx').length === 0, 'JSX tag delimiters must not become comparison mutations');
+assert(mutationAnalyzer.findMutationCandidates(['if (ready === true) return <Panel />;'], 'src/web/App.tsx').length === 2, 'TSX logic outside JSX tags should remain mutable');
+const logicalCandidates = mutationAnalyzer.findMutationCandidates(['if (count >= 1 && enabled === true) return;'], 'src/web/app.js');
+assert(logicalCandidates.length === 4, 'Executable comparisons, logical operators, and booleans should remain mutation candidates');
+assert(logicalCandidates.every(candidate => !candidate.mutatedLine.includes('!== false')), 'Each candidate must mutate only one operator occurrence');
 const scannerFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinel-scanner-'));
 fs.writeFileSync(path.join(scannerFixture, 'package.json'), JSON.stringify({ scripts: { test: 'node test.js' } }));
 assert(new ProjectScanner(scannerFixture).scan().harness.hasHarness === false, 'Generic test script must not be treated as Harness configuration');
@@ -270,6 +284,56 @@ assert(scorecard.overallScore === 80, '50% mutation kill rate should produce an 
 const unmeasuredScorecard = QualityScorer.computeScorecard({});
 assert(unmeasuredScorecard.status === 'INCONCLUSIVE', 'Missing evidence must be inconclusive');
 assert(unmeasuredScorecard.overallScore === null, 'Missing evidence must not receive a default score');
+const diffRemediation = buildRemediationPlan({
+  mode: 'diff-e2e',
+  projectPath: '/tmp/sample-project',
+  report: { result: evalResult, scorecard }
+});
+assert(diffRemediation.actions.some(action => action.title.includes('存活變異')), 'Low mutation score should produce an assertion remediation action');
+assert(diffRemediation.aiPrompt.includes('不得捏造'), 'AI remediation prompt must prohibit fabricated evidence');
+const locatedDiffRemediation = buildRemediationPlan({
+  mode: 'diff-e2e',
+  projectPath: '/tmp/sample-project',
+  report: {
+    result: {
+      status: 'MEASURED',
+      silentErrorsCaught: [],
+      caseComparisons: [{
+        id: 'DIFF-TC-02',
+        status: 'FAIL',
+        delta: '變異後測試仍通過。',
+        mutation: { filePath: 'src/example.js', originalLine: 'enabled === true', mutatedLine: 'enabled !== true' }
+      }]
+    },
+    scorecard: { overallScore: 72, metrics: { mutationKillRate: 27 }, evidence: { runtimeSafety: 'MEASURED' } }
+  }
+});
+assert(locatedDiffRemediation.aiPrompt.includes('檔案: src/example.js'), 'Diff remediation prompt should identify the mutation file');
+assert(locatedDiffRemediation.aiPrompt.includes('原始內容: enabled === true'), 'Diff remediation prompt should include original code');
+assert(locatedDiffRemediation.aiPrompt.includes('變異內容: enabled !== true'), 'Diff remediation prompt should include mutated code');
+assert(locatedDiffRemediation.aiPrompt.includes('不得直接修改 .test-eval/diff-probes/'), 'Diff remediation prompt should protect ephemeral probes');
+const harnessRemediation = buildRemediationPlan({
+  mode: 'harness-eval',
+  projectPath: harnessFixture,
+  report: {
+    status: 'UNHEALTHY',
+    harnessScript: 'npm run harness:check',
+    checks: [{ name: 'Fault Sensitivity', passed: false, detail: 'Corruption returned exit code 0' }]
+  }
+});
+assert(harnessRemediation.actions.some(action => action.title.includes('退出碼')), 'Harness false positive should produce an exit-code remediation action');
+assert(harnessRemediation.aiPrompt.includes('npm run harness:check'), 'Harness remediation prompt should include the measured verification command');
+const healthyRemediation = buildRemediationPlan({
+  mode: 'diff-e2e',
+  projectPath: '/tmp/sample-project',
+  report: {
+    result: { status: 'MEASURED', silentErrorsCaught: [], caseComparisons: [] },
+    scorecard: { overallScore: 100, metrics: { mutationKillRate: 100 }, evidence: { runtimeSafety: 'MEASURED' } }
+  }
+});
+assert(healthyRemediation.severity === 'NONE', 'Healthy measured results should have no remediation severity');
+assert(healthyRemediation.required === false, 'Healthy measured results should not require remediation');
+assert(healthyRemediation.actions.length === 0 && healthyRemediation.aiPrompt === null, 'Healthy measured results should not generate a generic AI prompt');
 console.log(`   ✅ Quality Scorer verified. Evidence-based score: ${scorecard.overallScore}/100`);
 
 // 9. History Manager Test (持久化與基準對比)

@@ -57,6 +57,10 @@ test('模式 A 大量測案可篩選、檢視，切換模式會清除狀態', as
         metrics: { mutationKillRate: null, silentErrorsCaught: null },
         evidence: { runtimeSafety: 'NOT_MEASURED' },
         insights: ['基線測試未通過。']
+      },
+      remediation: {
+        actions: [{ priority: 'HIGH', title: '先修復測試基線', detail: '確認基線可重現並修正根因。' }],
+        aiPrompt: '請直接檢查並修正目前專案的測試基線，完成後回報實際驗證結果。'
       }
     }
   }));
@@ -83,6 +87,10 @@ test('模式 A 大量測案可篩選、檢視，切換模式會清除狀態', as
   await expect(page.locator('.compact-case-card')).toHaveCount(25);
   await expect(page.locator('.compact-case-card').first()).toContainText('Invalid');
   await expect(page.locator('#casesCountBadge')).toHaveText('30 個測案');
+  await expect(page.locator('#remediationBox')).toBeVisible();
+  await expect(page.locator('#remediationActions')).toContainText('先修復測試基線');
+  await expect(page.locator('#remediationPromptText')).toHaveValue(/請直接檢查並修正/);
+  await expect(page.locator('#btnCopyRemediationPrompt')).toBeVisible();
 
   await page.locator('.mode-btn[data-mode="skill-eval"]').click();
   await expect(page.locator('#fseventStatus')).toHaveText('FSEvents 哨兵守候中 (0 Token)');

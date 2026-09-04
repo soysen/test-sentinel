@@ -137,6 +137,11 @@ const metricVal2 = document.getElementById('metricVal2');
 const metricVal3 = document.getElementById('metricVal3');
 const metricVal4 = document.getElementById('metricVal4');
 const insightsList = document.getElementById('insightsList');
+const remediationBox = document.getElementById('remediationBox');
+const remediationActions = document.getElementById('remediationActions');
+const remediationPromptText = document.getElementById('remediationPromptText');
+const btnCopyRemediationPrompt = document.getElementById('btnCopyRemediationPrompt');
+const copyRemediationPromptLabel = document.getElementById('copyRemediationPromptLabel');
 
 // 哨兵狀態
 const fseventDot = document.getElementById('fseventDot');
@@ -299,6 +304,7 @@ function bindEvents() {
   // 執行測試流程
   btnExecutePlan.addEventListener('click', executeTestFlow);
   btnCopyAgentPrompt.addEventListener('click', copyDesktopAgentPrompt);
+  btnCopyRemediationPrompt.addEventListener('click', copyRemediationPrompt);
 
   // 測案 Query / Input 編輯即時監聽與雙向綁定
   inspectInput.addEventListener('input', () => {
@@ -430,6 +436,19 @@ async function copyDesktopAgentPrompt() {
   }
   setTimeout(() => {
     copyAgentPromptLabel.textContent = '複製 Prompt';
+  }, 1800);
+}
+
+async function copyRemediationPrompt() {
+  try {
+    await navigator.clipboard.writeText(remediationPromptText.value);
+  } catch (error) {
+    remediationPromptText.select();
+    document.execCommand('copy');
+  }
+  copyRemediationPromptLabel.textContent = '已複製';
+  setTimeout(() => {
+    copyRemediationPromptLabel.textContent = '複製 AI 修正 Prompt';
   }, 1800);
 }
 
@@ -1598,6 +1617,25 @@ function renderScorecard(data) {
   }
 
   insightsList.innerHTML = (scorecard.insights || []).map(i => `<li>${i}</li>`).join('');
+
+  const remediation = data.remediation || scorecard.remediation;
+  const actions = Array.isArray(remediation?.actions) ? remediation.actions : [];
+  remediationActions.replaceChildren(...actions.map(action => {
+    const item = document.createElement('li');
+    const priority = document.createElement('span');
+    priority.className = `remediation-priority priority-${String(action.priority || 'MEDIUM').toLowerCase()}`;
+    priority.textContent = action.priority || 'MEDIUM';
+    const content = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = action.title;
+    const detail = document.createElement('p');
+    detail.textContent = action.detail;
+    content.append(title, detail);
+    item.append(priority, content);
+    return item;
+  }));
+  remediationPromptText.value = remediation?.aiPrompt || '';
+  remediationBox.classList.toggle('hidden', actions.length === 0 || !remediationPromptText.value);
 }
 
 // 9. SSE
