@@ -1,3 +1,4 @@
+const { getCasesPreview } = require("./routes/preview");
 /**
  * app.js - Test Sentinel 本地服務端
  * 提供 Web Dashboard 與 REST API + SSE (Server-Sent Events) 即時監聽
@@ -80,6 +81,18 @@ const server = http.createServer((req, res) => {
     res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(data, null, 2));
   };
+
+  // 測案預覽與目的解說端點 (Step 1: Preview)
+  if (pathname === "/api/cases/preview" && req.method === "POST") {
+    return readJsonBody((err, body) => {
+      try {
+        const preview = getCasesPreview(body);
+        return jsonResponse(preview);
+      } catch (e) {
+        return jsonResponse({ error: e.message }, 500);
+      }
+    });
+  }
 
   // API 路由
   if (pathname === '/api/projects/list' && req.method === 'GET') {
