@@ -186,7 +186,12 @@ function renderProjectInfo(p) {
 // 5. Skill 搜尋與單檔選擇
 function renderSkillList(skills, filter) {
   skillListContainer.innerHTML = '';
-  const filtered = skills.filter(s => s.name.toLowerCase().includes(filter.toLowerCase()));
+  const q = filter.toLowerCase().trim();
+  const filtered = skills.filter(s =>
+    s.name.toLowerCase().includes(q) ||
+    (s.source && s.source.toLowerCase().includes(q)) ||
+    (s.relPath && s.relPath.toLowerCase().includes(q))
+  );
 
   if (filtered.length === 0) {
     skillListContainer.innerHTML = '<span style="font-size: 0.8rem; color: var(--text-muted);">無匹配的 Skill</span>';
@@ -196,7 +201,7 @@ function renderSkillList(skills, filter) {
   filtered.forEach(s => {
     const chip = document.createElement('button');
     chip.className = `skill-chip ${state.selectedSkill?.path === s.path ? 'selected' : ''}`;
-    chip.textContent = s.name;
+    chip.innerHTML = `<span class="source-tag">${s.source || 'root'}</span>${s.name}`;
     chip.addEventListener('click', () => selectSingleSkill(s));
     skillListContainer.appendChild(chip);
   });

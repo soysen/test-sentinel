@@ -165,35 +165,39 @@ class ProjectScanner {
 
   detectSkills() {
     const skills = [];
-    const candidateDirs = [
-      path.join(this.projectPath, 'skills'),
-      path.join(this.projectPath, '.claude', 'skills'),
-      path.join(this.projectPath, '.gemini', 'skills')
+    const candidateSources = [
+      { dir: path.join(this.projectPath, '.github', 'skills'), source: '.github' },
+      { dir: path.join(this.projectPath, '.claude', 'skills'), source: '.claude' },
+      { dir: path.join(this.projectPath, '.gemini', 'skills'), source: '.gemini' },
+      { dir: path.join(this.projectPath, '.cursor', 'skills'), source: '.cursor' },
+      { dir: path.join(this.projectPath, '.antigravity', 'skills'), source: '.antigravity' },
+      { dir: path.join(this.projectPath, 'skills'), source: 'root' },
+      { dir: path.join(this.projectPath, 'docs', 'skills'), source: 'docs' }
     ];
 
-    for (const dir of candidateDirs) {
-      if (fs.existsSync(dir)) {
+    for (const item of candidateSources) {
+      if (fs.existsSync(item.dir)) {
         try {
-          const files = fs.readdirSync(dir);
-          for (const file of files) {
-            const fullPath = path.join(dir, file);
+          const files = fs.readdirSync(item.dir);
+          for (const f of files) {
+            const fullPath = path.join(item.dir, f);
             if (fs.statSync(fullPath).isDirectory()) {
               const skillMd = path.join(fullPath, 'SKILL.md');
               if (fs.existsSync(skillMd)) {
-                skills.push({ name: file, path: skillMd });
+                skills.push({ name: f, path: skillMd, source: item.source, relPath: path.relative(this.projectPath, skillMd) });
               }
-            } else if (file.endsWith('.md') && file.toLowerCase().includes('skill')) {
-              skills.push({ name: file.replace('.md', ''), path: fullPath });
+            } else if (f.endsWith('.md') && f.toLowerCase().includes('skill')) {
+              skills.push({ name: f.replace('.md', ''), path: fullPath, source: item.source, relPath: path.relative(this.projectPath, fullPath) });
             }
           }
         } catch (e) {}
       }
     }
 
-    // 根目錄是否有 SKILL.md 或 AGENTS.md
+    // 根目錄是否有 SKILL.md
     const rootSkill = path.join(this.projectPath, 'SKILL.md');
     if (fs.existsSync(rootSkill)) {
-      skills.push({ name: 'RootSkill', path: rootSkill });
+      skills.push({ name: 'RootSkill', path: rootSkill, source: 'root', relPath: 'SKILL.md' });
     }
 
     return skills;

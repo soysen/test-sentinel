@@ -65,7 +65,10 @@ if (command === 'run') {
     const evaluator = new SkillEvaluator(repo);
     const scanner = new ProjectScanner(repo);
     const profile = scanner.scan();
-    const skill = profile.skills[0];
+    const skillArg = args[3];
+    const skill = skillArg
+      ? (profile.skills.find(s => s.name === skillArg || s.path.includes(skillArg)) || { path: skillArg, name: skillArg })
+      : profile.skills[0];
 
     if (!skill) {
       console.log('❌ 專案中未找到任何 SKILL.md 檔案。');
