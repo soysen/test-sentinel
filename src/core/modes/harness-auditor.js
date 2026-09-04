@@ -54,8 +54,15 @@ class HarnessAuditor {
     const scriptIntegrity = this.runScriptIntegrityCheck(harnessCmd);
 
     const checks = [baseline, faultInjection, idempotency, scriptIntegrity];
-    const passedCount = checks.filter(c => c.passed).length;
-    const healthScore = Math.round((passedCount / checks.length) * 100);
+    const measuredChecks = checks.filter(check => typeof check.passed === 'boolean');
+    const passedCount = measuredChecks.filter(check => check.passed).length;
+    const healthScore = measuredChecks.length > 0
+      ? Math.round((passedCount / measuredChecks.length) * 100)
+      : null;
+    const mandatoryChecksPassed = baseline.passed && faultInjection.passed && idempotency.passed;
+    const auditStatus = !faultInjection.applicable
+      ? 'INCONCLUSIVE'
+      : (mandatoryChecksPassed ? 'HEALTHY' : 'UNHEALTHY');
 
     // 2. 測試標準規格
     const standards = [
@@ -81,7 +88,7 @@ class HarnessAuditor {
         name: '腳本退出碼防吞噬審核 (Exit Code Protection)',
         criterion: '腳本必須開啟 set -e 且禁止使用 || true 遮蔽錯誤',
         target: 'set -e Enabled',
-        status: scriptIntegrity.passed ? 'PASSED' : 'WARNING'
+        status: scriptIntegrity.passed === true ? 'PASSED' : (scriptIntegrity.passed === null ? 'NOT_EVALUATED' : 'WARNING')
       }
     ];
 
@@ -152,7 +159,7 @@ class HarnessAuditor {
       timestamp: new Date().toISOString(),
       harnessScript: harnessCmd,
       healthScore,
-      status: healthScore >= 75 ? 'HEALTHY' : 'NEEDS_ATTENTION',
+      status: auditStatus,
       standards,
       workflow,
       caseComparisons,
@@ -202,19 +209,20 @@ class HarnessAuditor {
       }
     }
 
-    let createdTemp = false;
     if (!targetFile) {
-      targetFile = path.join(this.projectPath, '.temp_sentinel_fault.json');
-      fs.writeFileSync(targetFile, '{ invalid_json_syntax: true', 'utf8');
-      createdTemp = true;
+      return {
+        name: 'Fault Sensitivity (實體故障注入測試)',
+        passed: false,
+        applicable: false,
+        exitCodeCaught: null,
+        detail: '找不到 Harness 已知會讀取的設定檔；拒絕以無關暫存檔冒充有效故障注入。'
+      };
     }
 
     let originalContent = null;
     try {
-      if (!createdTemp) {
-        originalContent = fs.readFileSync(targetFile, 'utf8');
-        fs.writeFileSync(targetFile, '{"__CORRUPTED_BY_TEST_SENTINEL__": true, invalid syntax ...', 'utf8');
-      }
+      originalContent = fs.readFileSync(targetFile, 'utf8');
+      fs.writeFileSync(targetFile, '{"__CORRUPTED_BY_TEST_SENTINEL__": true, invalid syntax ...', 'utf8');
 
       let faultCaught = false;
       let exitCodeCaught = 0;
@@ -235,15 +243,14 @@ class HarnessAuditor {
       return {
         name: 'Fault Sensitivity (實體故障注入測試)',
         passed: faultCaught,
+        applicable: true,
         exitCodeCaught,
         detail: faultCaught
           ? `✅ 破壞注入成功被攔截 (Exit Code: ${exitCodeCaught})。Harness 具備阻斷能力。`
           : '❌ 嚴重漏洞：已注入破壞資料，但 Harness 依然回傳 0 假性通過！'
       };
     } finally {
-      if (createdTemp) {
-        if (fs.existsSync(targetFile)) fs.unlinkSync(targetFile);
-      } else if (originalContent !== null) {
+      if (originalContent !== null) {
         fs.writeFileSync(targetFile, originalContent, 'utf8');
       }
     }
@@ -278,20 +285,28 @@ class HarnessAuditor {
   }
 
   runScriptIntegrityCheck(cmd) {
+    if (/^npm\s+(?:run\s+)?[\w:-]+$/.test(cmd.trim())) {
+      return {
+        name: 'Exit Code Integrity (退出碼嚴謹度)',
+        passed: null,
+        detail: 'npm script 的退出碼完整性需解析實際命令鏈，目前不以套件管理器包裝判定為通過。'
+      };
+    }
+
     const parts = cmd.split(' ');
     const scriptPath = parts.find(p => p.endsWith('.sh') || p.endsWith('.js'));
 
     if (!scriptPath) {
       return {
         name: 'Exit Code Integrity (退出碼嚴謹度)',
-        passed: true,
-        detail: '標準 npm/CLI 指令管理'
+        passed: null,
+        detail: '無法定位可靜態審核的腳本，標記為未評估。'
       };
     }
 
     const fullScriptPath = path.resolve(this.projectPath, scriptPath);
     if (!fs.existsSync(fullScriptPath)) {
-      return { name: 'Exit Code Integrity (退出碼嚴謹度)', passed: true, detail: '腳本由外部環境調度' };
+      return { name: 'Exit Code Integrity (退出碼嚴謹度)', passed: null, detail: '腳本由外部環境調度，標記為未評估。' };
     }
 
     const content = fs.readFileSync(fullScriptPath, 'utf8');
@@ -311,12 +326,12 @@ class HarnessAuditor {
 
   getGitStatus() {
     try {
-      const output = execSync('git status --porcelain', {
+      const output = execSync('git status --porcelain=v1 -z', {
         cwd: this.projectPath,
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'ignore']
-      }).trim();
-      return output ? output.split('\n').map(l => l.trim().slice(3)) : [];
+      });
+      return output ? output.split('\0').filter(Boolean).map(line => line.slice(3)) : [];
     } catch (e) {
       return [];
     }

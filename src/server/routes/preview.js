@@ -106,13 +106,12 @@ function getCasesPreview({ mode, projectPath, skillPath, harnessScript }) {
 
     const plannedCases = suite.map(c => ({
       id: `PLAN-SKILL-0${c.id}`,
-      name: c.type === 'in-domain' ? '領域內任務召回測案' : '領域外干擾問題抑制測案',
+      name: c.strategy,
       type: c.type === 'in-domain' ? '正向召回 (Recall)' : '負向抗干擾 (Precision)',
-      objective: c.type === 'in-domain'
-        ? `驗證當使用者提出與 [${meta.name}] 相關的操作需求時，Agent 能否正確自動啟用該 Skill。`
-        : `驗證當使用者詢問無關或陷阱問題時，Agent 不會胡亂觸發該 Skill 浪費 Token 或干擾思維。`,
+      objective: c.discriminationRationale,
+      inputDesign: `設計策略：${c.strategy}。輸入長度不是評分依據；重點是自然表述、語意變化、近鄰邊界與否定意圖。`,
       input: c.query,
-      expected: c.expectedTrigger ? '自動啟動該 Skill (信心度 >= 35%)' : '保持沉默 (信心度 < 35%)'
+      expected: c.expectedTrigger ? 'Agent 實際載入並套用目標 Skill' : 'Agent 不載入目標 Skill，使用一般能力處理'
     }));
 
     return {

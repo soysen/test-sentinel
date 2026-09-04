@@ -15,10 +15,17 @@
    - 先用 `ast-extractor.js` (2) 產出種子測資。
    - 遭遇執行期崩潰時用 `error-healer.js` (3) 自動打補丁。
    - 自癒成功後使用 `har-manager.js` (1) 固化為永久快照。
+5. **Agent 實測喚醒協議**：
+   - 需要實際 Agent 路由結果時，先以背景終端執行 `npm run agent:watch -- <目標專案>`。
+   - 收到 `AGENT_EVAL_WAKEUP_TRIGGERED` 或 `AGENT_EVAL_WAKEUP_IMMEDIATE` 後，執行 `npm run agent:next -- <目標專案>` 取得待測 queries。
+   - 每個 query 必須在新的 Agent context 中獨立執行；只有真正載入並套用目標 Skill 才回報 `triggered: true`。
+   - Agent 不得讀取 `.test-eval/agent-jobs/*.labels.json`。該檔案是密封的評分標籤，讀取會使評測失效。
+   - 將每案實際 output、可取得的 runtime token/latency，以及具證據的 quality checks 寫入結果 JSON。Runtime 未暴露 Token 時不可估算，必須填 `tokenMeasurementReason`，再執行 `npm run agent:complete -- <目標專案> <jobId> <result.json>`。
+   - 完成後重新執行 `agent:watch`，進入下一輪待命。完整協議見 `docs/AGENT_EVALUATION.md`。
 
 ## 🧪 驗證指令
 修改任何核心代碼後，請務必執行：
 ```bash
 node tests/self-test.js
 ```
-確保全數 8 個自檢模組皆回傳 PASS。
+確保全數 9 個自檢模組皆回傳 PASS。

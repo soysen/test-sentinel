@@ -17,6 +17,32 @@
   - 故障注入 (Fault Injection)：注入壞環境變數驗證是否有中斷能力。
   - 冪等性檢測 (Idempotency)：連跑兩次檢視快取與狀態殘留污染。
 
+### 評測證據狀態
+
+- `MEASURED`：已執行真實 baseline 與正負控制，可用於品質判定。
+- `HEURISTIC`：僅使用靜態或關鍵詞預檢，不應作為品質門禁。
+- `INCONCLUSIVE`：缺少測試命令、有效變異或可注入目標，不產生分數。
+
+Git Diff 模式會依序偵測 `test:e2e`、`e2e`、`test` npm script，執行 baseline 後逐一套用 diff mutation。只有 baseline 通過且 mutant 造成測試失敗時才計為 `KILLED`；逾時、語法錯誤與環境故障不列入擊殺率。Skill 模式只有在案例帶有路由器實際觀測的 `triggered` 值時才標示為 `MEASURED`。
+
+### FSEvent 喚醒 Agent 實測
+
+在 Agent 的背景終端先布防：
+
+```bash
+cd ~/projects/test-sentinel
+npm run agent:watch -- /path/to/target-project
+```
+
+接著在 Web 儀表板啟動 Skill 測試。Test Sentinel 會建立 Agent job；macOS FSEvents 使 watcher 輸出 job ID 並退出，喚醒已布防的 Desktop Agent。Agent 依序執行：
+
+```bash
+npm run agent:next -- /path/to/target-project
+npm run agent:complete -- /path/to/target-project <jobId> <result.json>
+```
+
+Web 會等待回寫，收到完整結果後才產生 `MEASURED` 分數。詳細結果格式、Agent prompt 與 task-dashboard 機制對照見 [Agent 實測協議](docs/AGENT_EVALUATION.md)。
+
 ### 2. GitNexus 知識圖譜衝擊分析 (Blast Radius Radar)
 - 透過 `gitnexus detect-changes` 映射 Git Diff 到 Symbols 與執行流程。
 - 透過 `gitnexus impact` 精準推導上游受波及的頁面與元件，縮小打擊面，避免整站盲目漫遊。

@@ -74,15 +74,18 @@ class ProjectScanner {
     }
 
     try {
+      const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' };
       const branch = execSync('git rev-parse --abbrev-ref HEAD', {
         cwd: this.projectPath,
         encoding: 'utf8',
+        env: gitEnv,
         stdio: ['pipe', 'pipe', 'ignore']
       }).trim();
 
       const status = execSync('git status --porcelain', {
         cwd: this.projectPath,
         encoding: 'utf8',
+        env: gitEnv,
         stdio: ['pipe', 'pipe', 'ignore']
       }).trim();
 

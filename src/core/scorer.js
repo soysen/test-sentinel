@@ -5,26 +5,51 @@
 
 class QualityScorer {
   static computeScorecard({ diffSummary, impactData, e2eResult, mockData }) {
-    let baseScore = 85;
     const insights = [];
 
+    const killRate = e2eResult?.mutationResults?.killRate;
+    const hasMutationEvidence = e2eResult?.status === 'MEASURED' && typeof killRate === 'number';
+    const hasRuntimeEvidence = Array.isArray(e2eResult?.silentErrorsCaught);
+
+    if (!hasMutationEvidence) {
+      return {
+        overallScore: null,
+        rating: 'INCONCLUSIVE',
+        color: '#64748b',
+        status: 'INCONCLUSIVE',
+        metrics: {
+          mutationKillRate: null,
+          silentErrorsCaught: hasRuntimeEvidence ? e2eResult.silentErrorsCaught.length : null,
+          blastRadiusRisk: impactData?.blastRadius?.riskLevel || null,
+          affectedSymbols: impactData?.blastRadius?.totalAffected || null
+        },
+        evidence: {
+          mutation: 'NOT_MEASURED',
+          runtimeSafety: hasRuntimeEvidence ? 'MEASURED' : 'NOT_MEASURED'
+        },
+        insights: [e2eResult?.reason || '缺少有效的 baseline 與變異測試證據，拒絕產生品質分數。'],
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    let baseScore = 60 + (killRate * 0.4);
+
     // 1. 變異測試擊殺率權重
-    const killRate = e2eResult?.mutationResults?.killRate ?? 80;
     if (killRate >= 90) {
-      baseScore += 10;
-      insights.push('✅ 變異測試擊殺率優異 (100%)，測試具備高敏銳度的鑑別力，能即時捕捉代碼邏輯被改壞的情況。');
+      insights.push(`✅ 變異測試擊殺率優異 (${killRate}%)，測試具備高敏銳度的鑑別力。`);
     } else if (killRate < 60) {
-      baseScore -= 15;
       insights.push('⚠️ 變異擊殺率偏低，部分斷言可能過於寬鬆，存在「代碼被改壞但測試仍通過」的假陽性風險。');
     }
 
     // 2. 靜默錯誤攔截
-    const silentErrors = e2eResult?.silentErrorsCaught?.length || 0;
-    if (silentErrors > 0) {
+    const silentErrors = hasRuntimeEvidence ? e2eResult.silentErrorsCaught.length : null;
+    if (silentErrors !== null && silentErrors > 0) {
       baseScore -= 20;
       insights.push(`❌ 攔截到 ${silentErrors} 個未捕獲的瀏覽器運行期崩潰 (Console Error / Uncaught Exception)。`);
-    } else {
+    } else if (silentErrors === 0) {
       insights.push('✅ 全域安全網未發現未捕獲的 Console Error 或 500 伺服器異常。');
+    } else {
+      insights.push('⚠️ 未取得瀏覽器運行期安全網證據，此項不視為通過。');
     }
 
     // 3. 爆炸半徑考量
@@ -42,6 +67,7 @@ class QualityScorer {
 
     return {
       overallScore: finalScore,
+      status: 'MEASURED',
       rating: finalScore >= 90 ? 'EXCELLENT' : finalScore >= 75 ? 'GOOD' : 'NEEDS_IMPROVEMENT',
       color: finalScore >= 90 ? '#10b981' : finalScore >= 75 ? '#f59e0b' : '#ef4444',
       metrics: {
@@ -49,6 +75,10 @@ class QualityScorer {
         silentErrorsCaught: silentErrors,
         blastRadiusRisk: riskLevel,
         affectedSymbols: impactData?.blastRadius?.totalAffected || 0
+      },
+      evidence: {
+        mutation: 'MEASURED',
+        runtimeSafety: hasRuntimeEvidence ? 'MEASURED' : 'NOT_MEASURED'
       },
       insights,
       timestamp: new Date().toISOString()

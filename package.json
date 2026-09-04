@@ -5,12 +5,16 @@
   "main": "src/server/app.js",
   "bin": {
     "test-sentinel": "src/cli/test-sentinel.js",
-    "sentinel-gate": "src/cli/watch-gate.js"
+    "sentinel-gate": "src/cli/watch-gate.js",
+    "sentinel-agent-eval": "src/cli/agent-eval.js"
   },
   "scripts": {
     "start": "node src/server/app.js",
     "dev": "node src/server/app.js",
     "gate": "node src/cli/watch-gate.js",
+    "agent:watch": "node src/cli/agent-eval.js watch",
+    "agent:next": "node src/cli/agent-eval.js next",
+    "agent:complete": "node src/cli/agent-eval.js complete",
     "test": "node tests/self-test.js"
   },
   "dependencies": {},

@@ -22,14 +22,32 @@
         </div>
       </div>
 
+      <!-- 頂部視圖切換分頁 -->
+      <nav class="nav-view-tabs">
+        <button id="tabNavWorkspace" class="nav-view-tab active">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+          </svg>
+          <span>即時評測工作區</span>
+        </button>
+        <button id="tabNavHistory" class="nav-view-tab">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span>歷史紀錄中心</span>
+          <span id="navHistoryBadge" class="badge badge-accent">0</span>
+        </button>
+      </nav>
+
       <div class="sentinel-status">
         <span class="pulse-dot active" id="fseventDot"></span>
         <span class="status-label" id="fseventStatus">FSEvents 哨兵守候中 (0 Token)</span>
       </div>
     </header>
 
-    <!-- 主體內容區 -->
-    <main class="dashboard-body">
+    <!-- 主體內容區 (即時評測工作區) -->
+    <main class="dashboard-body" id="workspaceView">
       <!-- 側邊欄：專案選擇與架構概覽 (移動至此) -->
       <aside class="sidebar-card">
         <div class="section-title">
@@ -67,7 +85,7 @@
               <line x1="12" y1="8" x2="12.01" y2="8"/>
             </svg>
             <strong>測試指標說明</strong>
-            <button id="toggleConceptBtn" class="link-btn">展開定義</button>
+            <button id="toggleConceptBtn" class="link-btn">[ + 展開 ]</button>
           </div>
           <div id="conceptBody" class="concept-body hidden">
             <div class="concept-v-list">
@@ -271,6 +289,22 @@
         <!-- 批准執行控制區：移至 casesSection 外，置中擺放 -->
         <div id="actionTriggerSection" class="action-trigger-wrapper mt-4 hidden">
           <div class="action-trigger-box">
+            <div id="desktopAgentPromptPanel" class="desktop-agent-prompt hidden">
+              <div class="desktop-agent-prompt-header">
+                <div>
+                  <strong>Desktop Agent 啟動 Prompt</strong>
+                  <small>開始 Skill 實測前，先複製並貼到 Desktop Agent。</small>
+                </div>
+                <button id="btnCopyAgentPrompt" class="btn btn-sm btn-accent" type="button" title="複製 Desktop Agent Prompt">
+                  <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                  <span id="copyAgentPromptLabel">複製 Prompt</span>
+                </button>
+              </div>
+              <textarea id="desktopAgentPromptText" class="desktop-agent-prompt-text" rows="12" readonly spellcheck="false"></textarea>
+            </div>
             <div class="trigger-desc">
               <strong>已確認上述測案與檢核目的？</strong>
               <small>點擊啟動實體測試，量測 Token 並比對產出品質。</small>
@@ -289,26 +323,47 @@
           <div class="section-badge-header">
             <span class="step-tag step-tag-done">STEP 2</span>
             <h3>實測總體評估與品質計分卡</h3>
-            <div id="overallScorePill" class="score-pill ml-auto">95 / 100 EXCELLENT</div>
+            <div id="overallScorePill" class="score-pill ml-auto">N/A INCONCLUSIVE</div>
+          </div>
+
+          <!-- 歷史存檔自動建檔確認橫幅 -->
+          <div id="scorecardHistoryArchiveBanner" class="history-archive-banner hidden mt-2">
+            <div class="archive-banner-info">
+              <svg class="nav-icon text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+              </svg>
+              <div>
+                <strong>本次評測結果已自動寫入歷史資料庫！</strong>
+                <span id="archiveRecordMeta" class="archive-meta-text">存檔編號：-</span>
+              </div>
+            </div>
+            <button id="btnJumpToHistory" class="btn btn-sm btn-accent">
+              <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+              </svg>
+              <span>前往獨立歷史紀錄中心檢視 &rarr;</span>
+            </button>
           </div>
 
           <div class="card scorecard-card mt-2">
             <div class="card-body">
               <div class="metrics-row">
                 <div class="metric-item">
-                  <span class="metric-num text-success" id="metricVal1">100%</span>
+                  <span class="metric-num text-success" id="metricVal1">N/A</span>
                   <span class="metric-label" id="metricLbl1">擊殺 / 召回率</span>
                 </div>
                 <div class="metric-item">
-                  <span class="metric-num text-info" id="metricVal2">95 分</span>
+                  <span class="metric-num text-info" id="metricVal2">N/A</span>
                   <span class="metric-label" id="metricLbl2">產出品質平均分</span>
                 </div>
                 <div class="metric-item">
-                  <span class="metric-num text-warning" id="metricVal3">1,245 tokens</span>
+                  <span class="metric-num text-warning" id="metricVal3">N/A</span>
                   <span class="metric-label" id="metricLbl3">本次實測總消耗</span>
                 </div>
                 <div class="metric-item">
-                  <span class="metric-num text-accent" id="metricVal4">全案通過</span>
+                  <span class="metric-num text-accent" id="metricVal4">尚未評估</span>
                   <span class="metric-label" id="metricLbl4">驗證狀態</span>
                 </div>
               </div>
@@ -330,7 +385,146 @@
 
       </section>
     </main>
-  </div>
+  <!-- 獨立畫面：歷史紀錄與基準回溯中心 (獨立切換專案、模式與檔案) -->
+  <main class="history-view-container hidden" id="historyView">
+    <!-- 頂部多維度篩選工具列 -->
+    <div class="hist-filter-toolbar">
+      <div class="hist-filter-left">
+        <!-- 1. 專案選擇 -->
+        <div class="hist-control-group">
+          <label for="histProjectSelect" class="hist-control-label">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span>專案：</span>
+          </label>
+          <select id="histProjectSelect" class="styled-select hist-select"></select>
+        </div>
+
+        <!-- 2. 評測模式切換 -->
+        <div class="hist-control-group">
+          <span class="hist-control-label">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+              <polyline points="2 17 12 22 22 17"/>
+              <polyline points="2 12 12 17 22 12"/>
+            </svg>
+            <span>模式：</span>
+          </span>
+          <div class="hist-mode-tabs" id="histModeTabs">
+            <button class="hist-mode-pill active" data-mode="all">全部模式</button>
+            <button class="hist-mode-pill" data-mode="diff-e2e">模式 A: Diff E2E</button>
+            <button class="hist-mode-pill" data-mode="skill-eval">模式 B: Skill 效益</button>
+            <button class="hist-mode-pill" data-mode="harness-eval">模式 C: Harness 健檢</button>
+          </div>
+        </div>
+
+        <!-- 3. 目標 / 檔案選擇 -->
+        <div class="hist-control-group">
+          <label for="histTargetSelect" class="hist-control-label">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <span>檔案 / 目標：</span>
+          </label>
+          <select id="histTargetSelect" class="styled-select hist-select">
+            <option value="all">全部檔案與目標</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="hist-filter-right">
+        <button id="btnHistReload" class="btn btn-outline btn-sm" title="重新整理歷史資料庫">
+          <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+          <span>重新整理</span>
+        </button>
+        <span id="histTotalCountBadge" class="badge badge-accent">0 筆紀錄</span>
+      </div>
+    </div>
+
+    <!-- 獨立雙欄主體佈局 (左欄：歷史清單，右欄：詳細報告與 Baseline 對比) -->
+    <div class="history-view-split">
+      <!-- 左欄：歷史清單 -->
+      <div class="history-list-col">
+        <div class="list-col-header">
+          <strong>歷次評測存檔時間軸</strong>
+          <span id="histListCountBadge" class="badge badge-neutral">0 筆</span>
+        </div>
+        <div id="histRecordList" class="history-record-list mt-2">
+          <!-- 動態注入歷史項目 -->
+        </div>
+      </div>
+
+      <!-- 右欄：單獨引入歷史詳細報告與基準 Delta -->
+      <div class="history-detail-col">
+        <div id="histDetailEmpty" class="history-empty-state">
+          <svg class="empty-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <p>請於左側選取任一歷史存檔，檢視完整詳細報告與 Baseline 差異</p>
+        </div>
+
+        <div id="histDetailContent" class="history-detail-view hidden">
+          <div class="history-detail-top">
+            <div>
+              <h4 id="histDetailTitle">評測詳細報告</h4>
+              <small id="histDetailTime" class="text-muted"></small>
+            </div>
+            <div id="histDetailScorePill" class="score-pill">95 / 100 EXCELLENT</div>
+          </div>
+
+          <!-- 基準 Delta 差異列 -->
+          <div id="histDetailDiffBar" class="history-detail-diff-bar mt-2">
+            <!-- Delta 標籤 -->
+          </div>
+
+          <!-- 指標卡片群 -->
+          <div class="metrics-row mt-3">
+            <div class="metric-item">
+              <span class="metric-num text-success" id="histMetricVal1">-</span>
+              <span class="metric-label" id="histMetricLbl1">擊殺 / 召回率</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-num text-info" id="histMetricVal2">-</span>
+              <span class="metric-label" id="histMetricLbl2">產出品質平均分</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-num text-warning" id="histMetricVal3">-</span>
+              <span class="metric-label" id="histMetricLbl3">Token 消耗總計</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-num text-accent" id="histMetricVal4">-</span>
+              <span class="metric-label" id="histMetricLbl4">驗證狀態</span>
+            </div>
+          </div>
+
+          <!-- 各測案清單 -->
+          <div class="detail-group mt-3">
+            <label>本歷史版本測案明細：</label>
+            <div id="histDetailCasesList" class="history-cases-container mt-1"></div>
+          </div>
+
+          <!-- 專家建議 -->
+          <div class="insights-box mt-3">
+            <div class="insights-title">
+              <svg class="info-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+              </svg>
+              <span>專家審查建議：</span>
+            </div>
+            <ul id="histInsightsList"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
 
   <script src="js/app.js"></script>
 </body>

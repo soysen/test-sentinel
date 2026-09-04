@@ -1,4 +1,6 @@
 const { getCasesPreview } = require("./routes/preview");
+const { handleHistoryRoutes } = require("./routes/history");
+const { HistoryManager } = require("../core/history-manager");
 /**
  * app.js - Test Sentinel 本地服務端
  * 提供 Web Dashboard 與 REST API + SSE (Server-Sent Events) 即時監聽
@@ -20,6 +22,7 @@ const { SkillEvaluator } = require('../core/modes/skill-evaluator');
 const { HarnessAuditor } = require('../core/modes/harness-auditor');
 const { QualityScorer } = require('../core/scorer');
 const { ProjectWatcher } = require('../core/watcher');
+const { AgentEvalQueue } = require('../core/agent-eval-queue');
 
 const PORT = process.env.PORT || 3890;
 const PROJECTS_BASE = path.join(process.env.HOME || '/Users/nelsonchung', 'projects');
@@ -78,8 +81,10 @@ const server = http.createServer((req, res) => {
   };
 
   const jsonResponse = (data, statusCode = 200) => {
+    if (res.headersSent || res.writableEnded) return true;
     res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(data, null, 2));
+    return true;
   };
 
   // 測案預覽與目的解說端點 (Step 1: Preview)
@@ -92,6 +97,11 @@ const server = http.createServer((req, res) => {
         return jsonResponse({ error: e.message }, 500);
       }
     });
+  }
+
+  // 歷史紀錄與 Baseline 對比 API 路由
+  if (handleHistoryRoutes(req, res, parsedUrl, readJsonBody, jsonResponse)) {
+    return;
   }
 
   // API 路由
@@ -166,12 +176,34 @@ const server = http.createServer((req, res) => {
     });
   }
 
+  if (pathname === '/api/agent-eval/status' && req.method === 'GET') {
+    try {
+      const projectPath = parsedUrl.searchParams.get('projectPath');
+      const jobId = parsedUrl.searchParams.get('jobId');
+      if (!projectPath || !jobId) {
+        return jsonResponse({ error: 'projectPath and jobId are required' }, 400);
+      }
+      const status = new AgentEvalQueue(projectPath).getStatus(jobId);
+      return status
+        ? jsonResponse(status)
+        : jsonResponse({ error: 'Agent evaluation job not found' }, 404);
+    } catch (e) {
+      return jsonResponse({ error: e.message }, 500);
+    }
+  }
+
   // 模式 A: Diff E2E 跑測與變異打分
   if (pathname === '/api/run/diff-e2e' && req.method === 'POST') {
     return readJsonBody((err, body) => {
       try {
         const runner = new DiffE2ERunner(body.projectPath);
-        const result = runner.runEvaluation(body);
+        const suppliedMutations = Array.isArray(body.mutations)
+          ? body.mutations.filter(mutation => mutation.filePath && mutation.originalLine && mutation.mutatedLine)
+          : [];
+        const mutations = suppliedMutations.length > 0
+          ? suppliedMutations
+          : new DiffAnalyzer(body.projectPath).getDiff(body.scope || 'all').files.flatMap(file => file.mutationCandidates);
+        const result = runner.runEvaluation({ ...body, mutations });
 
         // 結合評分器
         const scorecard = QualityScorer.computeScorecard({
@@ -181,7 +213,14 @@ const server = http.createServer((req, res) => {
           mockData: body.mockData
         });
 
-        return jsonResponse({ result, scorecard });
+        // 儲存至歷史紀錄並計算基準差異
+        const historyMgr = new HistoryManager(body.projectPath || process.cwd());
+        const targetName = body.targetFile ? path.basename(body.targetFile) : 'all-diffs';
+        const baseline = historyMgr.getLatestBaseline('diff-e2e', targetName);
+        const saved = historyMgr.saveReport('diff-e2e', targetName, { result, scorecard });
+        const diff = historyMgr.computeDiff({ result, scorecard }, baseline);
+
+        return jsonResponse({ result, scorecard, saved, diff, hasBaseline: !!baseline });
       } catch (e) {
         return jsonResponse({ error: e.message }, 500);
       }
@@ -192,9 +231,50 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/run/skill-eval' && req.method === 'POST') {
     return readJsonBody((err, body) => {
       try {
+        const cases = Array.isArray(body.cases) ? body.cases : [];
+        const hasRouterObservations = cases.length > 0
+          && cases.every(testCase => typeof testCase.triggered === 'boolean');
+        if (!hasRouterObservations && body.agentEvaluation !== false) {
+          const queue = new AgentEvalQueue(body.projectPath);
+          const job = queue.createSkillJob({
+            skillPath: body.skillPath,
+            skillName: body.skillName,
+            cases
+          });
+          sendSse('agent_eval_requested', {
+            projectPath: body.projectPath,
+            jobId: job.jobId,
+            mode: job.mode
+          });
+          return jsonResponse({
+            status: 'PENDING_AGENT',
+            jobId: job.jobId,
+            requestPath: queue.requestPath(job.jobId),
+            message: '等待 Agent 實際執行並回寫觀測結果。'
+          }, 202);
+        }
+
         const evaluator = new SkillEvaluator(body.projectPath);
-        const report = evaluator.evaluateSkill(body.skillPath, body.cases);
-        return jsonResponse(report);
+        const report = evaluator.evaluateSkill(body.skillPath, cases);
+
+        // 儲存至歷史紀錄並計算基準差異
+        const historyMgr = new HistoryManager(body.projectPath || process.cwd());
+        let targetName = body.skillName;
+        if (!targetName && body.skillPath) {
+          const bName = path.basename(body.skillPath);
+          if (bName.toLowerCase() === 'skill.md') {
+            targetName = path.basename(path.dirname(body.skillPath));
+          } else {
+            targetName = bName.replace(/\.md$/i, '');
+          }
+        }
+        targetName = targetName || 'skill';
+
+        const baseline = historyMgr.getLatestBaseline('skill-eval', targetName);
+        const saved = historyMgr.saveReport('skill-eval', targetName, report);
+        const diff = historyMgr.computeDiff(report, baseline);
+
+        return jsonResponse({ ...report, saved, diff, hasBaseline: !!baseline, targetName });
       } catch (e) {
         return jsonResponse({ error: e.message }, 500);
       }
@@ -207,7 +287,15 @@ const server = http.createServer((req, res) => {
       try {
         const auditor = new HarnessAuditor(body.projectPath);
         const report = auditor.auditHarness(body.harnessScript || 'npm test');
-        return jsonResponse(report);
+
+        // 儲存至歷史紀錄並計算基準差異
+        const historyMgr = new HistoryManager(body.projectPath || process.cwd());
+        const targetName = (body.harnessScript || 'npm_test').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const baseline = historyMgr.getLatestBaseline('harness-eval', targetName);
+        const saved = historyMgr.saveReport('harness-eval', targetName, report);
+        const diff = historyMgr.computeDiff(report, baseline);
+
+        return jsonResponse({ ...report, saved, diff, hasBaseline: !!baseline });
       } catch (e) {
         return jsonResponse({ error: e.message }, 500);
       }
@@ -258,6 +346,16 @@ const server = http.createServer((req, res) => {
         return jsonResponse({ error: e.message }, 500);
       }
     });
+  }
+
+  // 防禦：若 Headers 已發送或 Response 已結束，直接返回
+  if (res.headersSent || res.writableEnded) {
+    return;
+  }
+
+  // 若以 /api/ 開頭但未被匹配，回傳 JSON 404，不得落入靜態檔案伺服器
+  if (pathname.startsWith('/api/')) {
+    return jsonResponse({ error: `API endpoint not found: ${pathname}` }, 404);
   }
 
   // 靜態檔案服務 (Web Dashboard)

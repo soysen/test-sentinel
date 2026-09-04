@@ -25,15 +25,27 @@ class SkillEvaluator {
 
     // 2. 自動合成基準題庫 (若有傳入自訂或修改後的測案，優先採用自訂題庫)
     let benchmarkSuite;
+    let evaluationMode = 'HEURISTIC';
     if (Array.isArray(customCases) && customCases.length > 0) {
       benchmarkSuite = customCases.map((c, idx) => ({
         id: idx + 1,
         type: c.type?.includes('正向') || c.type === 'in-domain' ? 'in-domain' : 'distractor',
         query: c.input || c.query,
+        actualTriggered: typeof c.triggered === 'boolean' ? c.triggered : undefined,
+        actualOutput: typeof c.actualOutput === 'string' ? c.actualOutput : null,
+        promptTokens: Number.isFinite(c.promptTokens) ? c.promptTokens : null,
+        completionTokens: Number.isFinite(c.completionTokens) ? c.completionTokens : null,
+        tokenMeasurementStatus: c.tokenMeasurementStatus || null,
+        tokenMeasurementReason: typeof c.tokenMeasurementReason === 'string' ? c.tokenMeasurementReason : null,
+        latencyMs: Number.isFinite(c.latencyMs) ? c.latencyMs : null,
+        qualityChecks: Array.isArray(c.qualityChecks) ? c.qualityChecks : [],
         expectedTrigger: typeof c.expectedTrigger === 'boolean'
           ? c.expectedTrigger
           : (c.type?.includes('正向') || c.type === 'in-domain' || c.expected?.includes('>= 35%'))
       }));
+      if (benchmarkSuite.every(testCase => typeof testCase.actualTriggered === 'boolean')) {
+        evaluationMode = 'MEASURED';
+      }
     } else {
       benchmarkSuite = this.generateBenchmarkSuite(meta);
     }
@@ -54,7 +66,7 @@ class SkillEvaluator {
         name: '抗干擾精確率標準 (Distractor Precision)',
         criterion: '面對無關或陷阱問題時，觸發信心度需 < 35%，精確率需達 100%',
         target: 'Precision = 100%',
-        status: discriminationResult.precisionRate === 100 ? 'PASSED' : 'FAILED',
+        status: discriminationResult.specificityRate === 100 ? 'PASSED' : 'FAILED',
         explanation: '防止非相關問題誤觸發 Skill，杜絕 Context 污染與不必要的 Token 消耗。'
       },
       {
@@ -68,8 +80,8 @@ class SkillEvaluator {
         name: '產出品質契約合規性 (Quality & Output)',
         criterion: 'Skill 產出需嚴格遵循 SKILL.md 定義之步驟，無幻覺參數且具備高完整度',
         target: 'Quality Score >= 90',
-        status: 'PASSED',
-        explanation: '不僅驗證觸發，更評估 Agent 在載入此 Skill 後給出的指令與代碼品質。'
+        status: 'NOT_EVALUATED',
+        explanation: '目前沒有 Agent 產出與契約驗證證據，因此不產生品質分數。'
       }
     ];
 
@@ -82,51 +94,49 @@ class SkillEvaluator {
     ];
 
     // 6. 每個測案的詳細分析 (Token Breakdown, 產出結果, 品質打分, 信心解讀)
-    let totalTokensConsumed = 0;
+    let measuredTokenTotal = 0;
+    let measuredTokenCases = 0;
+    const measuredQualityScores = [];
     const caseComparisons = discriminationResult.cases.map(c => {
       const isExpectedTrigger = c.expectedTrigger;
       const isTriggered = c.triggered;
 
-      // 每個測案的 Token 消耗細節
-      const promptTokens = isTriggered ? Math.round(40 + promptAudit.estimatedTokens) : 35;
-      const completionTokens = isTriggered ? 210 : 65;
-      const caseTotalTokens = promptTokens + completionTokens;
-      totalTokensConsumed += caseTotalTokens;
+      const hasTokenEvidence = Number.isFinite(c.promptTokens) && Number.isFinite(c.completionTokens);
+      const tokenBreakdown = hasTokenEvidence ? {
+        promptTokens: c.promptTokens,
+        completionTokens: c.completionTokens,
+        totalTokens: c.promptTokens + c.completionTokens,
+        latencyMs: c.latencyMs
+      } : null;
+      if (tokenBreakdown) {
+        measuredTokenTotal += tokenBreakdown.totalTokens;
+        measuredTokenCases++;
+      }
 
-      const tokenBreakdown = {
-        promptTokens,
-        completionTokens,
-        totalTokens: caseTotalTokens,
-        latencyMs: isTriggered ? 480 : 120,
-        efficiencyNote: isTriggered
-          ? `包含 Skill 提示詞 Context (${promptAudit.estimatedTokens} tokens) + 結構化引導解答`
-          : `未觸發此 Skill，零額外 Context 負載，成功節省約 ${promptAudit.estimatedTokens} tokens`
-      };
+      const qualityChecks = Array.isArray(c.qualityChecks) ? c.qualityChecks : [];
+      const qualityEvaluation = qualityChecks.length > 0 ? {
+        score: Math.round((qualityChecks.filter(check => check.passed).length / qualityChecks.length) * 100),
+        rating: qualityChecks.every(check => check.passed) ? 'PASSED' : 'NEEDS_ATTENTION',
+        checks: qualityChecks,
+        summary: `${qualityChecks.filter(check => check.passed).length}/${qualityChecks.length} 項品質契約具備可觀測證據。`
+      } : null;
+      if (qualityEvaluation) measuredQualityScores.push(qualityEvaluation.score);
 
       // 信心指數解析
-      const confidenceDetails = {
+      const confidenceDetails = c.evidenceType === 'ROUTER_OBSERVATION' ? {
+        score: null,
+        rawNumber: null,
+        threshold: null,
+        verdict: isTriggered ? '實際觀測到 Skill 載入' : '實際觀測到 Skill 未載入',
+        explanation: '此結果來自獨立 Agent context 的實際路由觀測，不使用關鍵詞 confidence 模擬。'
+      } : {
         score: c.confidence,
         rawNumber: c.rawConfidence,
         threshold: '35%',
         verdict: isTriggered ? '達到觸發門檻 (>= 35%)' : '低於觸發門檻 (< 35%)',
         explanation: isTriggered
-          ? `Query 中命中多項核心意圖與關聯動作詞彙 [${c.matchedKeywords.join(', ')}]，計算權重分數為 ${c.confidence}，判定應立即自動載入並執行。`
-          : `Query 屬於非目標領域，與 Skill 描述無直接語意交集，計算權重分數為 ${c.confidence}，判定應保持靜默。`
-      };
-
-      // 模擬 Agent 真實產出內容預覽
-      const simulatedOutput = this.generateSimulatedOutput(meta, c);
-
-      // 產出品質評估 (Quality Evaluation)
-      const qualityEvaluation = {
-        score: c.passed ? (isTriggered ? 95 : 98) : 60,
-        rating: c.passed ? 'EXCELLENT' : 'POOR',
-        formatCompliance: c.passed ? '100% 合規' : '偏離規範',
-        factuality: c.passed ? '無幻覺，指令參數精確' : '存在未定義參數',
-        completeness: c.passed ? '步驟完整覆蓋' : '回答殘缺',
-        summary: isTriggered
-          ? '回應完全依照 SKILL.md 規定的工作流展開，提供清晰步驟與防禦性說明。'
-          : '成功識別為無關領域，未強行套用不相干的專業工具，無越界行為。'
+          ? `Query 中命中多項核心意圖與關聯動作詞彙 [${c.matchedKeywords.join(', ')}]，計算權重分數為 ${c.confidence}。`
+          : `Query 與 Skill 描述無直接字詞交集，計算權重分數為 ${c.confidence}。`
       };
 
       return {
@@ -135,18 +145,54 @@ class SkillEvaluator {
         type: c.type === 'in-domain' ? '正向任務 (In-Domain)' : '抗干擾防護 (Distractor)',
         input: c.query,
         expected: isExpectedTrigger ? '自動啟動 Skill (信心度 >= 35%) 並給出專業解法' : '保持沉默 (信心度 < 35%) 避免誤調用',
-        actual: isTriggered ? `啟動 Skill (實測信心度 ${c.confidence})` : `保持沉默 (實測信心度 ${c.confidence})`,
+        actual: c.evidenceType === 'ROUTER_OBSERVATION'
+          ? (isTriggered ? 'Agent 實際載入並套用 Skill' : 'Agent 實際未載入 Skill')
+          : (isTriggered ? `啟動 Skill (啟發式信心度 ${c.confidence})` : `保持沉默 (啟發式信心度 ${c.confidence})`),
         status: c.passed ? 'PASS' : 'FAIL',
         delta: c.passed ? '完全吻合 (差異度 0%)' : '出現誤判 (實測與預期相反)',
         tokenBreakdown,
+        tokenMeasurement: {
+          status: hasTokenEvidence ? 'MEASURED' : (c.tokenMeasurementStatus || 'UNAVAILABLE'),
+          reason: hasTokenEvidence ? null : (c.tokenMeasurementReason || 'Agent runtime 未提供 Token 使用量。'),
+          latencyMs: c.latencyMs
+        },
         confidenceDetails,
-        simulatedOutput,
-        qualityEvaluation
+        simulatedOutput: c.actualOutput,
+        qualityEvaluation,
+        evidenceType: c.evidenceType
       };
     });
+    const totalTokensConsumed = measuredTokenCases === caseComparisons.length && measuredTokenCases > 0
+      ? measuredTokenTotal
+      : null;
+    const tokenMeasurement = totalTokensConsumed === null
+      ? {
+        status: 'UNAVAILABLE',
+        measuredCases: measuredTokenCases,
+        totalCases: caseComparisons.length,
+        reasons: [...new Set(caseComparisons
+          .filter(testCase => testCase.tokenMeasurement.status !== 'MEASURED')
+          .map(testCase => testCase.tokenMeasurement.reason))]
+      }
+      : { status: 'MEASURED', measuredCases: measuredTokenCases, totalCases: caseComparisons.length, reasons: [] };
+    const averageQualityScore = measuredQualityScores.length === caseComparisons.length && measuredQualityScores.length > 0
+      ? Math.round(measuredQualityScores.reduce((total, value) => total + value, 0) / measuredQualityScores.length)
+      : null;
+    const qualityStandard = standards.find(standard => standard.name.includes('產出品質'));
+    qualityStandard.status = averageQualityScore === null
+      ? 'NOT_EVALUATED'
+      : (averageQualityScore >= 90 ? 'PASSED' : 'FAILED');
+    qualityStandard.explanation = averageQualityScore === null
+      ? '部分或全部測案缺少品質契約證據，因此不產生品質分數。'
+      : `依 Agent 回傳的逐條品質契約證據計算，平均分為 ${averageQualityScore}。`;
 
     // 計算綜合效益評分
-    const score = this.computeSkillScore(promptAudit, discriminationResult);
+    const routingScore = evaluationMode === 'MEASURED'
+      ? this.computeRoutingScore(discriminationResult)
+      : null;
+    const score = evaluationMode === 'MEASURED' && averageQualityScore !== null
+      ? this.computeSkillScore(promptAudit, routingScore, averageQualityScore)
+      : null;
 
     const suggestions = [];
     if (promptAudit.isBloated) {
@@ -156,11 +202,12 @@ class SkillEvaluator {
       suggestions.push('建議在 description 中補充「何時不要使用 (Negative Triggers)」，可進一步加強邊界防禦。');
     }
     if (discriminationResult.recallRate === 100 && discriminationResult.precisionRate === 100) {
-      suggestions.push('觸發關鍵詞明確，正負向領域隔離性優異，產出品質評分達到 95+。');
+      suggestions.push('正負向路由觀測均符合預期，未發現誤觸發或漏觸發。');
     }
 
     return {
       timestamp: new Date().toISOString(),
+      status: evaluationMode,
       skillName: meta.name || path.basename(path.dirname(fullPath)),
       path: path.relative(this.projectPath, fullPath),
       description: meta.description,
@@ -169,13 +216,24 @@ class SkillEvaluator {
       caseComparisons,
       promptAudit,
       totalTokensConsumed,
+      discriminationResult,
       metrics: {
         recallRate: discriminationResult.recallRate,
         precisionRate: discriminationResult.precisionRate,
+        specificityRate: discriminationResult.specificityRate,
+        f1Score: discriminationResult.f1Score,
+        confusionMatrix: discriminationResult.confusionMatrix,
         tokenWeight: `${promptAudit.estimatedTokens} tokens`,
-        totalTestTokens: `${totalTokensConsumed} tokens`,
-        estimatedTokenEfficiency: promptAudit.isBloated ? '+5%' : '+25%',
-        averageQualityScore: 95,
+        totalTestTokens: totalTokensConsumed,
+        tokenMeasurement,
+        estimatedTokenEfficiency: null,
+        averageQualityScore,
+        routingScore,
+        scoreCoverage: {
+          routing: evaluationMode === 'MEASURED' ? 'MEASURED' : 'HEURISTIC',
+          outputQuality: averageQualityScore === null ? 'NOT_EVALUATED' : 'MEASURED',
+          tokenUsage: tokenMeasurement.status
+        },
         overallScore: score
       },
       suggestions
@@ -224,36 +282,112 @@ class SkillEvaluator {
   }
 
   generateBenchmarkSuite(meta) {
-    const skillName = meta.name || 'Current Skill';
-    const desc = meta.description || '';
-
-    const words = desc.split(/\s+/).filter(w => w.length > 3 && !['when', 'user', 'needs', 'this', 'that', 'with', 'from'].includes(w.toLowerCase()));
-    const keyAction = words.slice(0, 3).join(' ') || skillName;
+    const domainText = `${meta.name || ''} ${meta.description || ''}`.toLowerCase();
+    if (/code.?review|review.*(?:diff|code)|security vulnerabilit|pull request|api contract/.test(domainText)) {
+      return this.generateCodeReviewBenchmarkSuite();
+    }
 
     return [
       {
         id: 1,
         type: 'in-domain',
-        query: `請幫我執行與 ${skillName} 相關的任務：${keyAction}`,
-        expectedTrigger: true
+        strategy: '自然短句正例',
+        query: '請依目前專案規範處理這項工作，並驗證結果是否正確。',
+        expectedTrigger: true,
+        discriminationRationale: '不提 Skill 名稱，只用自然任務意圖測試基本召回。'
       },
       {
         id: 2,
         type: 'in-domain',
-        query: `我想查閱 ${skillName} 的使用指南與最佳實踐`,
-        expectedTrigger: true
+        strategy: '口語同義正例',
+        query: '幫我把這件事照專案既有做法處理好，完成後確認沒有漏掉必要檢查。',
+        expectedTrigger: true,
+        discriminationRationale: '避開 description 原句，測試 Agent 能否辨識口語同義表達。'
       },
       {
         id: 3,
         type: 'distractor',
-        query: '請問最近股市科技股的趨勢如何？幫我分析下半年的大盤。',
-        expectedTrigger: false
+        strategy: '近鄰否定負例',
+        query: '只整理目前資訊，不要執行專案專屬流程，也不要提出修改建議。',
+        expectedTrigger: false,
+        discriminationRationale: '主題接近但明確排除專屬流程，測試否定語意抑制能力。'
       },
       {
         id: 4,
         type: 'distractor',
-        query: '請幫我用 Python 寫一個抓取 YouTube 影片標題的腳本。',
-        expectedTrigger: false
+        strategy: '完全無關負例',
+        query: '請比較這週三個城市的天氣預報。',
+        expectedTrigger: false,
+        discriminationRationale: '確認完全無關需求不會誤觸發。'
+      }
+    ];
+  }
+
+  generateCodeReviewBenchmarkSuite() {
+    return [
+      {
+        id: 1,
+        type: 'in-domain',
+        strategy: '自然短句正例',
+        query: '請檢查這次修改是否有會造成正式環境故障的問題。',
+        expectedTrigger: true,
+        discriminationRationale: '不提 Skill 名稱或固定術語，測試真實使用者意圖的基本召回。'
+      },
+      {
+        id: 2,
+        type: 'in-domain',
+        strategy: '詳盡同義正例',
+        query: '這個 PR 有沒有安全漏洞、未處理例外或 API 相容性風險？請依嚴重度列出可驗證的問題。',
+        expectedTrigger: true,
+        discriminationRationale: '用具體風險而非 Skill 名稱描述任務，測試多項職責的完整召回。'
+      },
+      {
+        id: 3,
+        type: 'in-domain',
+        strategy: '跨語言改寫正例',
+        query: 'Check the current patch for regressions, unsafe behavior, and missing tests. Report only actionable findings.',
+        expectedTrigger: true,
+        discriminationRationale: '測試相同意圖改用英文後，路由是否仍穩定。'
+      },
+      {
+        id: 4,
+        type: 'in-domain',
+        strategy: '最小差異正例',
+        query: '檢查這次 API 修改是否會破壞既有呼叫端。',
+        expectedTrigger: true,
+        discriminationRationale: '與第 5 題只差是否要求風險判斷，用來測量細微意圖差異。'
+      },
+      {
+        id: 5,
+        type: 'distractor',
+        strategy: '最小差異近鄰負例',
+        query: '摘要這次 API 修改內容，不要判斷是否會破壞既有呼叫端。',
+        expectedTrigger: false,
+        discriminationRationale: '保留相同 API 主題但移除審查意圖，測試是否因關鍵詞相近而誤觸發。'
+      },
+      {
+        id: 6,
+        type: 'distractor',
+        strategy: '明確否定負例',
+        query: '只執行現有測試並回報 exit code，不要審查程式碼或提出改善建議。',
+        expectedTrigger: false,
+        discriminationRationale: '工作仍與程式碼相關，但明確排除 review，測試否定語意是否生效。'
+      },
+      {
+        id: 7,
+        type: 'distractor',
+        strategy: '相鄰工程任務負例',
+        query: '請把目前未提交的檔案整理成一則 Conventional Commit 訊息。',
+        expectedTrigger: false,
+        discriminationRationale: '同屬軟體工程但目標是版本控制，測試領域邊界精確率。'
+      },
+      {
+        id: 8,
+        type: 'distractor',
+        strategy: '完全無關負例',
+        query: '請比較這週三個城市的天氣預報。',
+        expectedTrigger: false,
+        discriminationRationale: '確認完全無關需求不會誤觸發。'
       }
     ];
   }
@@ -265,10 +399,10 @@ class SkillEvaluator {
       .split(/\s+/)
       .filter(w => w.length > 2 && !['and', 'for', 'the', 'use', 'when', 'user', 'with'].includes(w));
 
-    let correctInDomain = 0;
-    let correctDistractor = 0;
-    let inDomainTotal = 0;
-    let distractorTotal = 0;
+    let truePositive = 0;
+    let falsePositive = 0;
+    let trueNegative = 0;
+    let falseNegative = 0;
 
     const evaluatedCases = suite.map(tc => {
       const queryLower = tc.query.toLowerCase();
@@ -276,34 +410,46 @@ class SkillEvaluator {
       const hitCount = matched.length;
       const confidence = Math.min(1.0, (hitCount / Math.max(1, Math.min(4, keywords.length))) + (queryLower.includes(meta.name.toLowerCase()) ? 0.6 : 0));
       const simulatedTrigger = confidence >= 0.35;
+      const triggered = typeof tc.actualTriggered === 'boolean' ? tc.actualTriggered : simulatedTrigger;
 
-      const isAccurate = simulatedTrigger === tc.expectedTrigger;
+      const isAccurate = triggered === tc.expectedTrigger;
 
-      if (tc.type === 'in-domain') {
-        inDomainTotal++;
-        if (isAccurate) correctInDomain++;
-      } else {
-        distractorTotal++;
-        if (isAccurate) correctDistractor++;
-      }
+      if (tc.expectedTrigger && triggered) truePositive++;
+      if (!tc.expectedTrigger && triggered) falsePositive++;
+      if (!tc.expectedTrigger && !triggered) trueNegative++;
+      if (tc.expectedTrigger && !triggered) falseNegative++;
 
       return {
         ...tc,
         confidence: Math.round(confidence * 100) + '%',
         rawConfidence: confidence,
         matchedKeywords: matched,
-        triggered: simulatedTrigger,
-        passed: isAccurate
+        triggered,
+        passed: isAccurate,
+        evidenceType: typeof tc.actualTriggered === 'boolean' ? 'ROUTER_OBSERVATION' : 'KEYWORD_HEURISTIC'
       };
     });
 
-    const recallRate = inDomainTotal > 0 ? Math.round((correctInDomain / inDomainTotal) * 100) : 100;
-    const precisionRate = distractorTotal > 0 ? Math.round((correctDistractor / distractorTotal) * 100) : 100;
+    const recallRate = truePositive + falseNegative > 0
+      ? Math.round((truePositive / (truePositive + falseNegative)) * 100)
+      : null;
+    const precisionRate = truePositive + falsePositive > 0
+      ? Math.round((truePositive / (truePositive + falsePositive)) * 100)
+      : null;
+    const specificityRate = trueNegative + falsePositive > 0
+      ? Math.round((trueNegative / (trueNegative + falsePositive)) * 100)
+      : null;
+    const f1Score = precisionRate !== null && recallRate !== null && precisionRate + recallRate > 0
+      ? Math.round((2 * precisionRate * recallRate) / (precisionRate + recallRate))
+      : null;
 
     return {
       cases: evaluatedCases,
       recallRate,
-      precisionRate
+      precisionRate,
+      specificityRate,
+      f1Score,
+      confusionMatrix: { truePositive, falsePositive, trueNegative, falseNegative }
     };
   }
 
@@ -329,10 +475,16 @@ class SkillEvaluator {
     }
   }
 
-  computeSkillScore(promptAudit, discrimination) {
-    let score = 90;
-    if (discrimination.recallRate < 100) score -= 20;
-    if (discrimination.precisionRate < 100) score -= 15;
+  computeRoutingScore(discrimination) {
+    const metrics = [discrimination.recallRate, discrimination.precisionRate]
+      .filter(value => typeof value === 'number');
+    return metrics.length > 0
+      ? Math.round(metrics.reduce((total, value) => total + value, 0) / metrics.length)
+      : null;
+  }
+
+  computeSkillScore(promptAudit, routingScore, qualityScore) {
+    let score = Math.round((routingScore * 0.8) + (qualityScore * 0.2));
     if (promptAudit.isBloated) score -= 10;
     if (!promptAudit.hasValidFrontmatter) score -= 15;
     return Math.max(0, Math.min(100, score));

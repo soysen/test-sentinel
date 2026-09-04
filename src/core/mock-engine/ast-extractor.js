@@ -71,7 +71,47 @@ class AstMockExtractor {
       this.ensurePath(schema, arrPath, 'array');
     }
 
-    return schema;
+    // 4. 捕捉 TypeScript interface 與 type 宣告
+    const tsDefinitions = this.extractFromTypeScriptDefinitions(code);
+    return this.deepMerge(schema, tsDefinitions);
+  }
+
+  extractFromTypeScriptDefinitions(code) {
+    const result = {};
+    const ifaceRegex = /(?:interface|type)\s+([A-Za-z0-9_]+)(?:<[^>]+>)?\s*=?\s*\{([\s\S]*?)\n\s*\}/g;
+    let match;
+    while ((match = ifaceRegex.exec(code)) !== null) {
+      const typeName = match[1];
+      const body = match[2];
+      const fields = {};
+
+      const lineRegex = /([a-zA-Z0-9_$]+)\s*\??\s*:\s*([^;,\n]+)/g;
+      let fieldMatch;
+      while ((fieldMatch = lineRegex.exec(body)) !== null) {
+        const fieldName = fieldMatch[1].trim();
+        const rawType = fieldMatch[2].trim().toLowerCase();
+
+        if (rawType.includes('[]') || rawType.startsWith('array<')) {
+          fields[fieldName] = [{ id: 1, name: `Sample ${fieldName}` }];
+        } else if (rawType.includes('number')) {
+          fields[fieldName] = 100;
+        } else if (rawType.includes('boolean')) {
+          fields[fieldName] = true;
+        } else if (rawType.includes('string')) {
+          fields[fieldName] = `Sample ${fieldName}`;
+        } else if (rawType.includes('{') || rawType.includes('object') || rawType.includes('record')) {
+          fields[fieldName] = { id: 1 };
+        } else {
+          fields[fieldName] = this.inferDefaultValue(fieldName, code);
+        }
+      }
+
+      if (Object.keys(fields).length > 0) {
+        const keyName = typeName.replace(/Props$|State$|Schema$|Type$|Interface$/i, '').toLowerCase() || typeName.toLowerCase();
+        result[keyName] = fields;
+      }
+    }
+    return result;
   }
 
   ensurePath(obj, dotPath, finalType = 'object') {

@@ -86,6 +86,47 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
   runEvaluation(options = {}) {
     const probe = this.generateProbeSpec(options);
     const mutations = options.mutations || [];
+    const testCommand = options.testCommand || this.detectTestCommand();
+
+    if (!testCommand) {
+      return this.buildInconclusiveResult(
+        probe,
+        mutations,
+        '未提供 testCommand，無法執行基線與變異測試。'
+      );
+    }
+
+    const baseline = this.runTestCommand(testCommand, options.timeoutMs);
+    if (!baseline.passed) {
+      return this.buildInconclusiveResult(
+        probe,
+        mutations,
+        '基線測試未通過，變異結果不具判定效力。',
+        baseline
+      );
+    }
+
+    if (mutations.length === 0) {
+      return this.buildInconclusiveResult(
+        probe,
+        mutations,
+        '未找到可執行的變異候選點。',
+        baseline
+      );
+    }
+
+    const mutationCases = mutations.map(mutation => this.evaluateMutation(
+      mutation,
+      testCommand,
+      options.timeoutMs
+    ));
+    const validCases = mutationCases.filter(result => ['KILLED', 'SURVIVED'].includes(result.status));
+    const killedCount = validCases.filter(result => result.status === 'KILLED').length;
+    const survivedCount = validCases.filter(result => result.status === 'SURVIVED').length;
+    const killRate = validCases.length > 0
+      ? Math.round((killedCount / validCases.length) * 100)
+      : null;
+    const evaluationStatus = validCases.length > 0 ? 'MEASURED' : 'INCONCLUSIVE';
 
     // 1. 定義測試標準
     const standards = [
@@ -93,19 +134,19 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
         name: '變異擊殺鑑別標準 (Mutation Sensitivity)',
         criterion: '當代碼關鍵條件 (如 ===, >, true) 被倒轉時，測試斷言必須能即時報錯 (Killed)，擊殺率需 >= 80%',
         target: 'Kill Rate >= 80%',
-        status: 'PASSED'
+        status: killRate !== null && killRate >= 80 ? 'PASSED' : (killRate === null ? 'NOT_EVALUATED' : 'FAILED')
       },
       {
         name: '零靜默運行期崩潰 (Zero Silent Crashes)',
         criterion: '瀏覽器載入與點擊互動期間，嚴禁出現未捕獲的 pageerror 或 console.error',
         target: 'Uncaught Errors = 0',
-        status: 'PASSED'
+        status: baseline.passed ? 'PASSED' : 'FAILED'
       },
       {
         name: '零伺服器服務端異常 (Zero Server 5xx)',
         criterion: '所有後端 API 請求均需正常回應，不得出現 500/502/504 服務中斷',
         target: 'Server 5xx = 0',
-        status: 'PASSED'
+        status: baseline.passed ? 'PASSED' : 'FAILED'
       }
     ];
 
@@ -117,85 +158,137 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       { step: 4, name: '變異反向攻擊測試', desc: '注入倒轉變異運算符，檢驗斷言殺死率', status: 'completed' }
     ];
 
-    // 3. 測案逐項結果比對 (含 Token 消耗、產出日誌與品質判定)
-    const caseComparisons = [
-      {
-        id: 'DIFF-TC-01',
-        name: '快樂路徑 (Happy Path) 頁面渲染與互動',
-        type: '行為健全性',
-        input: '造訪頁面並觸發主要按鈕點擊',
-        expected: '頁面順利完成 networkidle，DOM 元件正常可見',
-        actual: '頁面渲染完成，無拋出超時或渲染阻塞',
-        status: 'PASS',
-        delta: '符合預期 (100% 吻合)',
-        tokenBreakdown: { promptTokens: 320, completionTokens: 140, totalTokens: 460, latencyMs: 650 },
-        confidenceDetails: { score: '100%', meaning: '正常使用者流導航與點擊互動檢驗，斷言覆蓋齊全' },
-        simulatedOutput: '[Playwright 執行日誌]\n- navigate: http://localhost:3000 (status 200)\n- wait: networkidle (took 180ms)\n- click: button[role="button"] (resolved)\n- assert: expect(page).toHaveURL(/.*) -> OK',
-        qualityEvaluation: { score: 96, rating: 'EXCELLENT', summary: '頁面生命週期完整，無阻塞性資源請求。' }
-      },
-      {
-        id: 'DIFF-TC-02',
-        name: '全域安全網：無聲崩潰監聽 (Silent Error Watchdog)',
-        type: '安全網防護',
-        input: '即時監聽 pageerror 與 console.error',
-        expected: '未捕獲錯誤數 = 0 (嚴禁白屏或 TypeError)',
-        actual: '未捕獲錯誤數 = 0 (Console 清淨)',
-        status: 'PASS',
-        delta: '符合底線防護要求',
-        tokenBreakdown: { promptTokens: 180, completionTokens: 75, totalTokens: 255, latencyMs: 210 },
-        confidenceDetails: { score: '100%', meaning: '全域底層 Event Listener 持續攔截，未發現任何未處理的 Promise 拒絕或語法例外' },
-        simulatedOutput: '[Console Watcher Snapshot]\n- page.on("pageerror"): 0 events\n- page.on("console.error"): 0 events\n- http.on("5xx"): 0 responses\n- status: CLEAN',
-        qualityEvaluation: { score: 98, rating: 'EXCELLENT', summary: '底線安全網健全，徹底消除無聲崩潰風險。' }
-      },
-      {
-        id: 'DIFF-TC-03',
-        name: '變異反向攻擊 1：條件反轉 (Invert Equality)',
-        type: '變異擊殺測試',
-        input: '故意將代碼中的 === 顛倒為 !==',
-        expected: '測試必須立即報警中斷 (Killed)',
-        actual: '測試成功攔截報錯 (Killed in 42ms)',
-        status: 'PASS',
-        delta: '具備高鑑別度 (已擊殺)',
-        tokenBreakdown: { promptTokens: 280, completionTokens: 110, totalTokens: 390, latencyMs: 380 },
-        confidenceDetails: { score: '95%', meaning: '變異注入破壞後，斷言敏銳拋出 ExpectationError，未放行損壞代碼' },
-        simulatedOutput: '[Mutation Engine Output]\n- Injected mutation: replace === with !== at line 42\n- Test run result: FAIL (AssertionError: expected true but received false)\n- Verdict: MUTANT KILLED (鑑別度合格)',
-        qualityEvaluation: { score: 94, rating: 'EXCELLENT', summary: '測試具備真實邏輯殺死力，非假陽性測試。' }
-      },
-      {
-        id: 'DIFF-TC-04',
-        name: '變異反向攻擊 2：布林條件翻轉 (Flip Boolean)',
-        type: '變異擊殺測試',
-        input: '故意將狀態值 true 翻轉為 false',
-        expected: '測試必須立即報警中斷 (Killed)',
-        actual: '測試成功攔截報錯 (Killed in 38ms)',
-        status: 'PASS',
-        delta: '具備高鑑別度 (已擊殺)',
-        tokenBreakdown: { promptTokens: 260, completionTokens: 95, totalTokens: 355, latencyMs: 340 },
-        confidenceDetails: { score: '95%', meaning: '布林顛倒後，UI 狀態斷言即時捕捉到狀態不吻合' },
-        simulatedOutput: '[Mutation Engine Output]\n- Injected mutation: replace true with false\n- Test run result: FAIL (Element should be visible but is hidden)\n- Verdict: MUTANT KILLED (鑑別度合格)',
-        qualityEvaluation: { score: 94, rating: 'EXCELLENT', summary: '成功驗證狀態分支覆蓋完整性。' }
-      }
-    ];
+    const caseComparisons = mutationCases.map((result, index) => ({
+      id: `DIFF-TC-${String(index + 1).padStart(2, '0')}`,
+      name: result.mutation.type || '程式碼變異',
+      type: '變異擊殺測試',
+      input: `${result.mutation.filePath}: ${result.mutation.originalLine}`,
+      expected: '測試因行為斷言失敗而回傳非零狀態',
+      actual: `${result.status} (Exit Code: ${result.evidence.exitCode})`,
+      status: result.status === 'KILLED' ? 'PASS' : (result.status === 'SURVIVED' ? 'FAIL' : 'INCONCLUSIVE'),
+      delta: result.reason,
+      evidence: result.evidence
+    }));
 
     const result = {
       timestamp: new Date().toISOString(),
       probeFile: probe.relativeFile,
-      baselinePassed: true,
+      status: evaluationStatus,
+      baselinePassed: baseline.passed,
+      baselineEvidence: baseline,
       standards,
       workflow,
       caseComparisons,
       silentErrorsCaught: [],
       networkFailuresCaught: [],
       mutationResults: {
-        totalMutations: 2,
-        killedCount: 2,
-        survivedCount: 0,
-        killRate: 100
+        totalMutations: mutations.length,
+        validMutations: validCases.length,
+        killedCount,
+        survivedCount,
+        invalidCount: mutationCases.length - validCases.length,
+        killRate
       },
-      discriminativeScore: 95
+      discriminativeScore: killRate
     };
 
     return result;
+  }
+
+  detectTestCommand() {
+    const packagePath = path.join(this.projectPath, 'package.json');
+    if (!fs.existsSync(packagePath)) return null;
+    try {
+      const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+      const scripts = pkg.scripts || {};
+      for (const scriptName of ['test:e2e', 'e2e', 'test']) {
+        if (scripts[scriptName]) return `npm run ${scriptName}`;
+      }
+    } catch (error) {
+      return null;
+    }
+    return null;
+  }
+
+  runTestCommand(command, timeoutMs = 20000) {
+    const startedAt = Date.now();
+    try {
+      const stdout = execSync(command, {
+        cwd: this.projectPath,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: timeoutMs
+      });
+      return { passed: true, exitCode: 0, durationMs: Date.now() - startedAt, stdout: stdout.slice(-2000), stderr: '' };
+    } catch (error) {
+      return {
+        passed: false,
+        exitCode: typeof error.status === 'number' ? error.status : null,
+        durationMs: Date.now() - startedAt,
+        stdout: String(error.stdout || '').slice(-2000),
+        stderr: String(error.stderr || error.message || '').slice(-2000),
+        timedOut: error.code === 'ETIMEDOUT'
+      };
+    }
+  }
+
+  evaluateMutation(mutation, testCommand, timeoutMs) {
+    const targetPath = path.resolve(this.projectPath, mutation.filePath || '');
+    const evidence = { command: testCommand, filePath: mutation.filePath, exitCode: null };
+    if (!targetPath.startsWith(this.projectPath + path.sep) || !fs.existsSync(targetPath)) {
+      return { mutation, status: 'INVALID', reason: '變異目標不存在或超出專案範圍。', evidence };
+    }
+
+    const originalContent = fs.readFileSync(targetPath, 'utf8');
+    const occurrences = originalContent.split(mutation.originalLine).length - 1;
+    if (!mutation.originalLine || !mutation.mutatedLine || occurrences !== 1) {
+      return { mutation, status: 'INVALID', reason: `原始程式行命中 ${occurrences} 次，無法安全套用變異。`, evidence };
+    }
+
+    try {
+      fs.writeFileSync(targetPath, originalContent.replace(mutation.originalLine, mutation.mutatedLine), 'utf8');
+      const execution = this.runTestCommand(testCommand, timeoutMs);
+      Object.assign(evidence, execution);
+      if (execution.passed) {
+        return { mutation, status: 'SURVIVED', reason: '變異後測試仍通過。', evidence };
+      }
+      if (execution.timedOut || this.looksLikeInfrastructureFailure(execution)) {
+        return { mutation, status: 'INVALID', reason: '測試因逾時、語法或環境錯誤失敗，不能計為擊殺。', evidence };
+      }
+      return { mutation, status: 'KILLED', reason: '變異使測試以非零狀態結束。', evidence };
+    } finally {
+      fs.writeFileSync(targetPath, originalContent, 'utf8');
+    }
+  }
+
+  looksLikeInfrastructureFailure(execution) {
+    const output = `${execution.stdout}\n${execution.stderr}`;
+    return /SyntaxError|Cannot find module|command not found|ECONNREFUSED|ERR_MODULE_NOT_FOUND/i.test(output);
+  }
+
+  buildInconclusiveResult(probe, mutations, reason, baselineEvidence = null) {
+    return {
+      timestamp: new Date().toISOString(),
+      probeFile: probe.relativeFile,
+      status: 'INCONCLUSIVE',
+      reason,
+      baselinePassed: baselineEvidence ? baselineEvidence.passed : null,
+      baselineEvidence,
+      standards: [],
+      workflow: [],
+      caseComparisons: [],
+      silentErrorsCaught: null,
+      networkFailuresCaught: null,
+      mutationResults: {
+        totalMutations: mutations.length,
+        validMutations: 0,
+        killedCount: 0,
+        survivedCount: 0,
+        invalidCount: 0,
+        killRate: null
+      },
+      discriminativeScore: null
+    };
   }
 
   promoteProbe(probeFile, destinationRelPath = 'tests/e2e/sentinel-promoted.spec.js') {
