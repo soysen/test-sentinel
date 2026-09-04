@@ -13,19 +13,13 @@
     <!-- 頂部導航 -->
     <header class="top-nav">
       <div class="brand">
-        <span class="logo-shield">🛡️</span>
+        <svg class="nav-icon brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
         <div class="brand-text">
           <h1>TEST SENTINEL</h1>
           <span class="version-tag">AI-Native Quality & Eval Daemon</span>
         </div>
-      </div>
-
-      <div class="project-selector-bar">
-        <label for="projectSelect">專案：</label>
-        <select id="projectSelect" class="styled-select">
-          <option value="">載入中...</option>
-        </select>
-        <button id="refreshBtn" class="btn btn-icon" title="重新整理專案">🔄</button>
       </div>
 
       <div class="sentinel-status">
@@ -36,254 +30,277 @@
 
     <!-- 主體內容區 -->
     <main class="dashboard-body">
-      <!-- 側邊欄：專案資訊與模式切換 -->
+      <!-- 側邊欄：專案選擇與架構概覽 (移動至此) -->
       <aside class="sidebar-card">
         <div class="section-title">
-          <span>📋 專案架構概覽</span>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>專案選擇與架構概覽</span>
         </div>
-        <div id="projectInfo" class="meta-box">
-          <p class="empty-hint">請選擇專案...</p>
+
+        <!-- 專案選取器 -->
+        <div class="project-selector-wrapper mt-2">
+          <label for="projectSelect" class="input-label">目標專案：</label>
+          <div class="project-select-row">
+            <select id="projectSelect" class="styled-select">
+              <option value="">載入專案清單中...</option>
+            </select>
+            <button id="refreshBtn" class="btn btn-icon" title="重新整理專案">
+              <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div id="projectInfo" class="meta-box mt-3">
+          <p class="empty-hint">請選取專案進行掃描...</p>
         </div>
 
         <div class="section-title mt-4">
-          <span>🎯 評測模式切換</span>
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+            <polyline points="2 17 12 22 22 17"/>
+            <polyline points="2 12 12 17 22 12"/>
+          </svg>
+          <span>評測模式</span>
         </div>
         <div class="mode-tabs">
           <button class="mode-btn active" data-mode="diff-e2e">
-            <span class="mode-icon">⚡</span>
             <div class="mode-info">
               <strong>模式 A: Git Diff E2E</strong>
-              <small>暫存探針 + 變異測試</small>
+              <small>暫存探針與變異測試</small>
             </div>
           </button>
           <button class="mode-btn" data-mode="skill-eval">
-            <span class="mode-icon">🧠</span>
             <div class="mode-info">
               <strong>模式 B: Skill 效益評測</strong>
-              <small>單檔搜尋 + 意圖召回</small>
+              <small>單檔搜尋、意圖與品質</small>
             </div>
           </button>
           <button class="mode-btn" data-mode="harness-eval">
-            <span class="mode-icon">🧪</span>
             <div class="mode-info">
               <strong>模式 C: Harness 健檢</strong>
-              <small>實體故障注入 + 冪等性</small>
+              <small>實體故障注入與隔離性</small>
             </div>
           </button>
         </div>
       </aside>
 
-      <!-- 主要內容區：模式專屬焦點視圖 -->
+      <!-- 主要內容區 (全幅保留給測試流程與細節) -->
       <section class="main-content">
         
-        <!-- [模式 A 專屬面板] -->
-        <div id="modePanel-diff-e2e" class="mode-panel active">
-          <div class="mode-banner">
-            <div class="banner-title">
-              <h2>⚡ 模式 A：Git Diff E2E 智慧測試與變異鑑別</h2>
-              <p>鎖定代碼修改局部，在 <code>.test-eval/</code> 建立隔離探針並故意注入邏輯反轉，檢驗測試是否具備真實抓壞能力。</p>
-            </div>
-            <button id="btnGenDiffCases" class="btn btn-primary">🔍 1. 生成並預覽 E2E 測案</button>
-          </div>
-
-          <!-- 工具折疊抽屜 -->
-          <div class="tools-accordion mt-3">
-            <details class="accordion-item">
-              <summary>🌐 GitNexus 衝擊圖譜與爆炸半徑 (點擊展開)</summary>
-              <div class="accordion-body">
-                <div id="gitnexusStatusText" class="gn-summary">檢查中...</div>
-                <div id="affectedList" class="affected-grid mt-2"></div>
-              </div>
-            </details>
-            <details class="accordion-item mt-2">
-              <summary>🧩 2 $\rightarrow$ 3 零測資自癒 Mock 引擎 (針對舊專案)</summary>
-              <div class="accordion-body">
-                <div class="mock-grid">
-                  <div>
-                    <span class="col-title">[解法 2] 靜態 AST 逆向提取 (Seed Mock)</span>
-                    <pre id="seedMockView" class="code-view">點擊下方按鈕進行掃描...</pre>
-                    <button id="extractAstBtn" class="btn btn-sm btn-outline mt-2">掃描目標元件</button>
-                  </div>
-                  <div>
-                    <span class="col-title">[解法 3] 執行期崩潰動態自癒 (Healed Mock)</span>
-                    <pre id="healedMockView" class="code-view">等待報錯反饋...</pre>
-                    <button id="simulateHealBtn" class="btn btn-sm btn-outline mt-2">模擬報錯補全</button>
-                  </div>
+        <!-- 頂部控制列：左上角放置 Skill 選擇器，右側放置執行動作 -->
+        <div class="command-bar">
+          <div class="command-left">
+            <!-- 模式 B 下顯示的 Skill 選擇器 (初始無預設值) -->
+            <div id="skillSelectorGroup" class="skill-selector-group">
+              <label class="control-label">選擇要測試的 Skill：</label>
+              <div class="autocomplete-wrapper">
+                <div class="autocomplete-input-box">
+                  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                  </svg>
+                  <input type="text" id="skillSearchInput" class="autocomplete-input" placeholder="請選擇或搜尋 Skill..." autocomplete="off">
+                  <button type="button" id="toggleDropdownBtn" class="dropdown-arrow-btn" title="切換選單">
+                    <svg class="arrow-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                  </button>
+                </div>
+                <div id="autocompleteDropdown" class="autocomplete-dropdown hidden">
+                  <!-- 選項動態生成 -->
                 </div>
               </div>
-            </details>
-          </div>
-        </div>
-
-        <!-- [模式 B 專屬面板] -->
-        <div id="modePanel-skill-eval" class="mode-panel">
-          <div class="mode-banner">
-            <div class="banner-title">
-              <h2>🧠 模式 B：Skill 效益評測與 Prompt 負載健檢</h2>
-              <p>精確搜尋專案中的單檔 <code>SKILL.md</code>，審核 Token 負載，並自動合成領域必答題與干擾陷阱題實測觸發鑑別度。</p>
             </div>
-            <button id="btnGenSkillCases" class="btn btn-primary">🔍 1. 生成並預覽該 Skill 評測案</button>
+
+            <!-- 模式 A / C 的狀態標題 -->
+            <div id="modeGenericHeader" class="generic-mode-header hidden">
+              <span id="genericModeTag" class="badge badge-accent">模式 A</span>
+              <span id="genericModeDesc" class="generic-desc">Git Diff 變異擊殺與全域防護</span>
+            </div>
           </div>
 
-          <!-- Skill Autocomplete 下拉選單模組 -->
-          <div class="skill-picker-card mt-3">
-            <div class="picker-header">
-              <label><strong>🎯 選擇要測試的 Skill：</strong></label>
-              <span id="skillCountTag" class="badge badge-accent">0 個可用</span>
-            </div>
-            <div class="autocomplete-wrapper mt-2">
-              <div class="autocomplete-input-box">
-                <span class="autocomplete-icon">🔍</span>
-                <input type="text" id="skillSearchInput" class="autocomplete-input" placeholder="點擊下拉或輸入搜尋 Skill (支援名稱、.github、.claude)..." autocomplete="off">
-                <button type="button" id="toggleDropdownBtn" class="dropdown-arrow-btn" title="切換下拉選單">▼</button>
-              </div>
-              <div id="autocompleteDropdown" class="autocomplete-dropdown hidden">
-                <!-- 動態選項 -->
-              </div>
-            </div>
-            <div id="selectedSkillPreview" class="selected-preview-box mt-3">
-              請選取 Skill 進行測試
-            </div>
-          </div>
-        </div>
-
-        <!-- [模式 C 專屬面板] -->
-        <div id="modePanel-harness-eval" class="mode-panel">
-          <div class="mode-banner">
-            <div class="banner-title">
-              <h2>🧪 模式 C：Harness 流程實體健檢與故障注入</h2>
-              <p>真實執行專案測試流程，並在背後故意破壞設定檔，檢驗腳本是否具備實質阻斷能力 (杜絕壞資料仍回傳 0 的假陽性)。</p>
-            </div>
-            <button id="btnGenHarnessCases" class="btn btn-primary">🔍 1. 生成並預覽 Harness 健檢項目</button>
-          </div>
-
-          <div class="harness-target-card mt-3">
-            <div class="flex-between">
-              <div>
-                <strong>目標測試指令：</strong>
-                <code id="harnessCmdDisplay">npm run harness:check</code>
-              </div>
-              <span class="badge badge-accent">實體執行環境已就緒</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- ============================================== -->
-        <!-- [第一階段：測案預覽與目的解說 (Step 1: Preview)] -->
-        <!-- ============================================== -->
-        <div id="previewSection" class="workflow-section mt-4 hidden">
-          <div class="section-badge-header">
-            <span class="step-badge">STEP 1</span>
-            <h3>預覽測案清單與測試目的說明</h3>
-            <span id="previewTargetTag" class="badge badge-accent ml-auto"></span>
-          </div>
-
-          <!-- 檢定標準 -->
-          <div class="card standards-card mt-2">
-            <div class="card-header">
-              <div class="header-left">
-                <span class="card-icon">📏</span>
-                <h4>本模式檢定標準 (Evaluation Standards)</h4>
-              </div>
-            </div>
-            <div id="standardsContainer" class="standards-grid"></div>
-          </div>
-
-          <!-- 預覽測案與目的說明清單 -->
-          <div class="card cases-preview-card mt-3">
-            <div class="card-header">
-              <div class="header-left">
-                <span class="card-icon">📝</span>
-                <h4>預計執行的測案與測試目的 (Test Objectives)</h4>
-              </div>
-            </div>
-            <div id="plannedCasesList" class="planned-cases-list"></div>
-          </div>
-
-          <!-- 批准執行按鈕 -->
-          <div class="action-trigger-box mt-3">
-            <div class="trigger-desc">
-              <strong>已確認測案目的與檢核標準？</strong>
-              <small>點擊下方按鈕，平台將正式啟動底層執行引擎進行測試、破壞注入與比對打分。</small>
-            </div>
-            <button id="btnExecutePlan" class="btn btn-success btn-lg">
-              ▶️ 2. 批准測案並開始實體執行 (Run & Compare)
+          <div class="command-right">
+            <button id="btnGenerateFlow" class="btn btn-primary">
+              <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <span>1. 生成測試流程與測案</span>
             </button>
           </div>
         </div>
 
-        <!-- ============================================== -->
-        <!-- [第二階段：實測結果逐項對照 (Step 2: Results)] -->
-        <!-- ============================================== -->
-        <div id="resultsSection" class="workflow-section mt-4 hidden">
+        <!-- 輔助資訊與概念解析面板 (Concept Explanation Panel) -->
+        <div class="concept-explanation-card mt-3">
+          <div class="concept-header">
+            <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <strong>測試指標說明</strong>
+            <button id="toggleConceptBtn" class="link-btn">展開指標定義</button>
+          </div>
+          <div id="conceptBody" class="concept-body hidden">
+            <div class="concept-grid">
+              <div class="concept-box">
+                <span class="concept-term">信心指數 (Confidence Score)</span>
+                <p>根據使用者查詢 (Query) 的語意特徵與 Skill 描述關鍵詞之交集計算出的機率值。門檻值為 <strong>35%</strong>：大於等於 35% 判定為觸發 (Triggered)，小於 35% 判定為抑制 (Suppressed)。</p>
+              </div>
+              <div class="concept-box">
+                <span class="concept-term">產出品質 (Output Quality)</span>
+                <p>不僅檢驗是否觸發，更評估 Agent 調用該 Skill 後產出內容的<strong>格式合規度</strong>、<strong>參數準確度 (無幻覺)</strong> 與<strong>步驟完整性</strong> (0-100 分)。</p>
+              </div>
+              <div class="concept-box">
+                <span class="concept-term">逐測案 Token 消耗 (Case Token Breakdown)</span>
+                <p>分別量測每個測案的 <strong>Prompt Tokens (輸入含 Skill Context)</strong> 與 <strong>Completion Tokens (推論輸出)</strong>，以掌握真實資源開銷與節省效益。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Function Flow 測試流程畫布 -->
+        <div class="card flow-card mt-3">
+          <div class="card-header">
+            <div class="header-left">
+              <svg class="card-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <line x1="3" y1="9" x2="21" y2="9"/>
+                <line x1="9" y1="21" x2="9" y2="9"/>
+              </svg>
+              <h3>執行管線流程 (Function Flow)</h3>
+            </div>
+            <span id="flowStatusBadge" class="badge badge-neutral">尚未啟動</span>
+          </div>
+          <div class="card-body">
+            <div id="functionFlowContainer" class="function-flow-track">
+              <!-- 步驟節點動態生成 -->
+            </div>
+          </div>
+        </div>
+
+        <!-- 第一階段：測案區塊預覽 (Step 1: Test Case Blocks) -->
+        <div id="casesSection" class="mt-4 hidden">
           <div class="section-badge-header">
-            <span class="step-badge step-badge-done">STEP 2</span>
-            <h3>實測結果比對與鑑別度評分</h3>
-            <div id="overallScorePill" class="score-pill ml-auto">90 / 100 GOOD</div>
+            <span class="step-tag">STEP 1</span>
+            <h3>測案區塊與目的說明 (點選任一測案檢視細節)</h3>
+            <span id="casesCountBadge" class="badge badge-accent ml-auto">4 個測案</span>
           </div>
 
-          <!-- 測案逐項對比表 -->
-          <div class="card comparison-card mt-2">
-            <div class="card-header">
-              <div class="header-left">
-                <span class="card-icon">⚖️</span>
-                <h4>預期行為 vs 實際表現逐項比對 (Expected vs. Actual)</h4>
-              </div>
-            </div>
-            <div class="table-container">
-              <table class="comparison-table">
-                <thead>
-                  <tr>
-                    <th style="width: 110px;">編號</th>
-                    <th>測案名稱</th>
-                    <th style="width: 110px;">類型</th>
-                    <th>輸入條件 / 刺激</th>
-                    <th>預期行為 (Expected)</th>
-                    <th>實際表現 (Actual)</th>
-                    <th style="width: 80px;">狀態</th>
-                    <th>鑑別解讀 (Delta)</th>
-                  </tr>
-                </thead>
-                <tbody id="comparisonRows"></tbody>
-              </table>
-            </div>
+          <!-- 互動測案區塊網格 (Clickable Case Blocks) -->
+          <div id="caseBlocksGrid" class="case-blocks-grid mt-2">
+            <!-- 測案區塊動態生成 -->
           </div>
 
-          <!-- 品質計分卡與行動回饋 -->
-          <div class="card scorecard-card mt-3">
-            <div class="card-header">
-              <div class="header-left">
-                <span class="card-icon">📊</span>
-                <h4>品質指標與 AI 行動回饋</h4>
+          <!-- 批准執行控制區 -->
+          <div class="action-trigger-box mt-3">
+            <div class="trigger-desc">
+              <strong>已確認上述測案規劃與檢核目的？</strong>
+              <small>點擊開始執行，系統將啟動沙盒進行實體破壞測試、量測每個測案的 Token 消耗並比對產出品質。</small>
+            </div>
+            <button id="btnExecutePlan" class="btn btn-success btn-lg">
+              <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              <span>2. 批准測案並開始實體執行</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 側邊或底部抽屜：個別測案詳細資訊檢視器 (Case Detail Inspector) -->
+        <div id="caseInspectorModal" class="inspector-card mt-4 hidden">
+          <div class="inspector-header">
+            <div class="header-left">
+              <svg class="card-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+              </svg>
+              <h4 id="inspectorCaseTitle">測案詳細檢視</h4>
+            </div>
+            <button id="closeInspectorBtn" class="close-btn" title="關閉">&times;</button>
+          </div>
+          <div class="inspector-body">
+            <div class="inspector-grid">
+              <!-- 左側：輸入與信心指數解析 -->
+              <div class="inspector-col">
+                <div class="detail-group">
+                  <label>輸入刺激 (Query / Input)：</label>
+                  <pre id="inspectInput" class="code-view-sm"></pre>
+                </div>
+
+                <div class="detail-group mt-2">
+                  <label>信心指數解析 (Confidence Breakdown)：</label>
+                  <div id="inspectConfidenceBox" class="meta-callout"></div>
+                </div>
+
+                <div class="detail-group mt-2">
+                  <label>個別測案 Token 消耗明細：</label>
+                  <div id="inspectTokenTable" class="token-breakdown-box"></div>
+                </div>
+              </div>
+
+              <!-- 右側：實際產出內容與品質評審 -->
+              <div class="inspector-col">
+                <div class="detail-group">
+                  <label>Agent 產出結果預覽 (Simulated Output)：</label>
+                  <pre id="inspectOutput" class="code-view-lg"></pre>
+                </div>
+
+                <div class="detail-group mt-2">
+                  <label>產出品質評審 (Quality Evaluation)：</label>
+                  <div id="inspectQualityBox" class="quality-score-box"></div>
+                </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- 第二階段：整體評估結果與品質計分卡 (Step 2: Scorecard) -->
+        <div id="scorecardSection" class="mt-4 hidden">
+          <div class="section-badge-header">
+            <span class="step-tag step-tag-done">STEP 2</span>
+            <h3>實測總體評估與品質計分卡</h3>
+            <div id="overallScorePill" class="score-pill ml-auto">95 / 100 EXCELLENT</div>
+          </div>
+
+          <div class="card scorecard-card mt-2">
             <div class="card-body">
               <div class="metrics-row">
                 <div class="metric-item">
                   <span class="metric-num text-success" id="metricVal1">100%</span>
-                  <span class="metric-label" id="metricLbl1">擊殺/召回率</span>
+                  <span class="metric-label" id="metricLbl1">擊殺 / 召回率</span>
                 </div>
                 <div class="metric-item">
-                  <span class="metric-num text-info" id="metricVal2">0</span>
-                  <span class="metric-label" id="metricLbl2">崩潰/殘留數</span>
+                  <span class="metric-num text-info" id="metricVal2">95 分</span>
+                  <span class="metric-label" id="metricLbl2">產出品質平均分</span>
                 </div>
                 <div class="metric-item">
-                  <span class="metric-num text-warning" id="metricVal3">LOW</span>
-                  <span class="metric-label" id="metricLbl3">風險/負載</span>
+                  <span class="metric-num text-warning" id="metricVal3">1,245 tokens</span>
+                  <span class="metric-label" id="metricLbl3">本次實測總消耗</span>
                 </div>
                 <div class="metric-item">
-                  <span class="metric-num text-accent" id="metricVal4">實體已驗證</span>
-                  <span class="metric-label" id="metricLbl4">執行狀態</span>
+                  <span class="metric-num text-accent" id="metricVal4">全案通過</span>
+                  <span class="metric-label" id="metricLbl4">驗證狀態</span>
                 </div>
               </div>
 
               <div class="insights-box mt-3">
-                <h4>💡 AI 專家審查回饋與行動建議：</h4>
+                <div class="insights-title">
+                  <svg class="info-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="16" x2="12" y2="12"/>
+                    <line x1="12" y1="8" x2="12.01" y2="8"/>
+                  </svg>
+                  <span>專家審查建議：</span>
+                </div>
                 <ul id="insightsList"></ul>
-              </div>
-
-              <div id="diffActionsBar" class="actions-bar mt-3 hidden">
-                <button id="promoteBtn" class="btn btn-secondary">⭐ 一鍵晉升為正式測試 (Promote to Core)</button>
               </div>
             </div>
           </div>
