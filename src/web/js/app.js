@@ -13,6 +13,15 @@ const state = {
   currentCases: [],
   selectedCaseId: null,
   lastEvaluation: null,
+  activeEvaluationId: null,
+  evaluationStartedAt: null,
+  evaluationProgress: null,
+  caseView: {
+    query: '',
+    status: 'all',
+    page: 1,
+    pageSize: 25
+  },
   projectsList: [], // 全域專案清單
   // 獨立歷史紀錄中心篩選與暫存狀態
   history: {
@@ -93,6 +102,13 @@ const functionFlowContainer = document.getElementById('functionFlowContainer');
 const casesSection = document.getElementById('casesSection');
 const casesCountBadge = document.getElementById('casesCountBadge');
 const caseMasterList = document.getElementById('caseMasterList');
+const caseResultsToolbar = document.getElementById('caseResultsToolbar');
+const caseResultStats = document.getElementById('caseResultStats');
+const caseSearchInput = document.getElementById('caseSearchInput');
+const caseStatusFilter = document.getElementById('caseStatusFilter');
+const casePrevPage = document.getElementById('casePrevPage');
+const caseNextPage = document.getElementById('caseNextPage');
+const casePageInfo = document.getElementById('casePageInfo');
 const actionTriggerSection = document.getElementById('actionTriggerSection');
 const btnExecutePlan = document.getElementById('btnExecutePlan');
 const desktopAgentPromptPanel = document.getElementById('desktopAgentPromptPanel');
@@ -149,13 +165,13 @@ function bindEvents() {
   // 工作區專案路徑選取、輸入與瀏覽
   if (refreshBtn) {
     refreshBtn.addEventListener('click', () => {
-      const p = (projectPathInput && projectPathInput.value.trim()) || state.currentProject;
+      const p = state.currentProject || getProjectPathInputValue();
       if (p) selectProject(p);
     });
   }
   if (btnLoadProject) {
     btnLoadProject.addEventListener('click', () => {
-      const p = (projectPathInput && projectPathInput.value.trim()) || state.currentProject;
+      const p = getProjectPathInputValue();
       if (p) selectProject(p);
     });
   }
@@ -163,7 +179,7 @@ function bindEvents() {
     projectPathInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        const p = projectPathInput.value.trim();
+        const p = getProjectPathInputValue();
         if (p) selectProject(p);
       }
     });
@@ -171,6 +187,28 @@ function bindEvents() {
   if (browseFolderBtn) {
     browseFolderBtn.addEventListener('click', browseFolder);
   }
+  if (caseSearchInput) {
+    caseSearchInput.addEventListener('input', () => {
+      state.caseView.query = caseSearchInput.value.trim().toLowerCase();
+      state.caseView.page = 1;
+      renderCaseBlocks(state.currentCases);
+    });
+  }
+  if (caseStatusFilter) {
+    caseStatusFilter.addEventListener('change', () => {
+      state.caseView.status = caseStatusFilter.value;
+      state.caseView.page = 1;
+      renderCaseBlocks(state.currentCases);
+    });
+  }
+  casePrevPage?.addEventListener('click', () => {
+    state.caseView.page = Math.max(1, state.caseView.page - 1);
+    renderCaseBlocks(state.currentCases);
+  });
+  caseNextPage?.addEventListener('click', () => {
+    state.caseView.page += 1;
+    renderCaseBlocks(state.currentCases);
+  });
 
   // 獨立歷史中心：專案切換
   if (histProjectSelect) {
@@ -210,10 +248,11 @@ function bindEvents() {
   // 工作區評測模式切換
   modeButtons.forEach(btn => {
     btn.addEventListener('click', () => {
+      const modeChanged = state.activeMode !== btn.dataset.mode;
       modeButtons.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.activeMode = btn.dataset.mode;
-      updateModeView();
+      updateModeView({ clearCases: modeChanged });
     });
   });
 
@@ -302,7 +341,7 @@ function updateCustomInputStatus(activeCase) {
         customTag = document.createElement('span');
         customTag.className = 'custom-badge-tag badge badge-accent';
         customTag.textContent = '已自訂';
-        leftCard.querySelector('.case-item-top').appendChild(customTag);
+        leftCard.querySelector('.case-item-top, .compact-case-heading')?.appendChild(customTag);
       }
     } else if (customTag) {
       customTag.remove();
@@ -311,12 +350,24 @@ function updateCustomInputStatus(activeCase) {
 }
 
 // 2. 模式視圖切換
-function updateModeView() {
+function updateSentinelStatus(message = null, isAttention = false) {
+  const modeLabels = {
+    'diff-e2e': '本機變異測試',
+    'skill-eval': 'FSEvents 哨兵守候中 (0 Token)',
+    'harness-eval': '本機 Harness 健檢'
+  };
+  fseventStatus.textContent = message || modeLabels[state.activeMode];
+  fseventDot.style.backgroundColor = isAttention ? '#f59e0b' : '#10b981';
+}
+
+function updateModeView({ clearCases = false } = {}) {
+  if (clearCases) clearCaseResults();
   const isSkillMode = state.activeMode === 'skill-eval';
   skillSelectorGroup.classList.toggle('hidden', !isSkillMode);
   modeGenericHeader.classList.toggle('hidden', isSkillMode);
   desktopAgentPromptPanel.classList.toggle('hidden', !isSkillMode);
   updateDesktopAgentPrompt();
+  updateSentinelStatus();
 
   if (!isSkillMode) {
     if (state.activeMode === 'diff-e2e') {
@@ -587,7 +638,7 @@ function filterAndRenderHistoryRecords() {
       </div>
       <div class="record-meta">
         <span class="record-target"><small style="color: var(--border-bright); font-weight: normal;">[${item.mode}]</small> ${item.target}</span>
-        <span class="record-score score-pill">${item.overallScore} 分</span>
+        <span class="record-score score-pill">${item.overallScore === null ? 'N/A' : `${item.overallScore} 分`}</span>
       </div>
       <div class="record-action-bar mt-2">
         <span class="hist-item-action-pill">[ 點選切換檢視 ➔ ]</span>
@@ -619,12 +670,12 @@ async function loadHistoryRecordDetail(recordId, mode, target) {
     if (histDetailEmpty) histDetailEmpty.classList.add('hidden');
     if (histDetailContent) histDetailContent.classList.remove('hidden');
 
-    const score = report.overallScore ?? report.scorecard?.overallScore ?? report.metrics?.overallScore ?? report.healthScore ?? 0;
-    const rating = report.scorecard?.rating || (score >= 90 ? 'EXCELLENT' : score >= 80 ? 'GOOD' : 'NEEDS_ATTENTION');
+    const score = report.overallScore ?? report.scorecard?.overallScore ?? report.metrics?.overallScore ?? report.healthScore ?? null;
+    const rating = score === null ? 'INCONCLUSIVE' : (report.scorecard?.rating || (score >= 90 ? 'EXCELLENT' : score >= 80 ? 'GOOD' : 'NEEDS_ATTENTION'));
 
     if (histDetailTitle) histDetailTitle.textContent = `[${mode}] ${target} 評測歷史存檔`;
     if (histDetailTime) histDetailTime.textContent = `存檔編號: ${recordId} | 時間: ${report.savedAt ? report.savedAt.substring(0, 19).replace('T', ' ') : 'N/A'}`;
-    if (histDetailScorePill) histDetailScorePill.textContent = `${score} / 100 [${rating}]`;
+    if (histDetailScorePill) histDetailScorePill.textContent = score === null ? 'N/A [INCONCLUSIVE]' : `${score} / 100 [${rating}]`;
 
     // 差異標籤計算
     const diffRes = await fetch(`/api/history/diff?project=${encodeURIComponent(state.history.project)}&mode=${encodeURIComponent(mode)}&target=${encodeURIComponent(target)}&id=${encodeURIComponent(recordId)}`);
@@ -633,9 +684,9 @@ async function loadHistoryRecordDetail(recordId, mode, target) {
       const d = diffData.diff;
       histDetailDiffBar.innerHTML = `
         <span class="text-xs" style="color: #94a3b8;">基準差異 (相較 Baseline)：</span>
-        <span class="diff-tag ${d.scoreDelta >= 0 ? 'positive' : 'negative'}">總分 ${d.scoreDelta >= 0 ? '+' : ''}${d.scoreDelta}</span>
+        <span class="diff-tag ${d.scoreDelta === null ? 'neutral' : d.scoreDelta >= 0 ? 'positive' : 'negative'}">總分 ${d.scoreDelta === null ? 'N/A' : `${d.scoreDelta >= 0 ? '+' : ''}${d.scoreDelta}`}</span>
         <span class="diff-tag ${d.tokensSaved ? 'positive' : d.tokensDelta === 0 ? 'neutral' : 'negative'}">Token ${d.tokensDelta < 0 ? '節省 ' : d.tokensDelta > 0 ? '+' : '持平 '}${Math.abs(d.tokensDelta)}</span>
-        <span class="diff-tag ${d.recallDelta >= 0 ? 'positive' : 'negative'}">召回率 ${d.recallDelta >= 0 ? '+' : ''}${d.recallDelta}%</span>
+        <span class="diff-tag ${d.recallDelta === null ? 'neutral' : d.recallDelta >= 0 ? 'positive' : 'negative'}">召回率 ${d.recallDelta === null ? 'N/A' : `${d.recallDelta >= 0 ? '+' : ''}${d.recallDelta}%`}</span>
       `;
       histDetailDiffBar.classList.remove('hidden');
     } else {
@@ -653,7 +704,7 @@ async function loadHistoryRecordDetail(recordId, mode, target) {
       histMetricLbl3.textContent = 'Token 消耗總計';
       histMetricVal3.textContent = `${report.metrics?.totalTokens ?? 0} tokens`;
       histMetricLbl4.textContent = '合規狀態';
-      histMetricVal4.textContent = score >= 80 ? 'PASSED' : 'WARNING';
+      histMetricVal4.textContent = score === null ? 'INCONCLUSIVE' : (score >= 80 ? 'PASSED' : 'WARNING');
     } else {
       histMetricLbl1.textContent = '擊殺率 / 健康度';
       const killRate = report.scorecard?.metrics?.mutationKillRate ?? report.healthScore ?? null;
@@ -664,7 +715,7 @@ async function loadHistoryRecordDetail(recordId, mode, target) {
       histMetricLbl3.textContent = 'Token 消耗';
       histMetricVal3.textContent = report.scorecard?.metrics?.totalTokens || 'N/A';
       histMetricLbl4.textContent = '驗證狀態';
-      histMetricVal4.textContent = score >= 80 ? 'PASSED' : 'WARNING';
+      histMetricVal4.textContent = score === null ? 'INCONCLUSIVE' : (score >= 80 ? 'PASSED' : 'WARNING');
     }
 
     // 各測案明細
@@ -698,7 +749,7 @@ function pathBasename(p) {
   return p.split(/[\\/]/).filter(Boolean).pop() || p;
 }
 
-function renderInitialFunctionFlow() {
+function getModeFlow(mode = state.activeMode) {
   const flows = {
     'diff-e2e': [
       { step: 1, name: '變更分析', desc: '鎖定修改行與變異點' },
@@ -720,8 +771,11 @@ function renderInitialFunctionFlow() {
     ]
   };
 
-  const steps = flows[state.activeMode] || flows['diff-e2e'];
-  renderFlowTrack(steps, 0);
+  return flows[mode] || flows['diff-e2e'];
+}
+
+function renderInitialFunctionFlow() {
+  renderFlowTrack(getModeFlow(), 0);
 }
 
 function renderFlowTrack(steps, completedUpTo = 0) {
@@ -817,17 +871,30 @@ async function loadProjects() {
   }
 }
 
+function getProjectPathInputValue() {
+  const value = projectPathInput?.value.trim() || '';
+  const selectedFolder = state.currentProject
+    ? state.currentProject.split(/[/\\]/).filter(Boolean).pop()
+    : '';
+  if (state.currentProject && (value === state.profile?.name || value === selectedFolder)) {
+    return state.currentProject;
+  }
+  return value || state.currentProject;
+}
+
 async function selectProject(projPath) {
   if (!projPath) return;
   const targetPath = projPath.trim();
   if (!targetPath) return;
 
   state.currentProject = targetPath;
+  clearCaseResults();
   if (projectPathInput) {
     projectPathInput.value = targetPath;
   }
   updateDesktopAgentPrompt();
   clearSkillSelection();
+  updateModeAvailability(null);
   projectInfo.innerHTML = '<p>掃描專案架構中...</p>';
 
   try {
@@ -840,11 +907,13 @@ async function selectProject(projPath) {
     if (!res.ok || profile.error) {
       throw new Error(profile.error || `HTTP ${res.status}`);
     }
+    if (state.currentProject !== targetPath) return;
 
     state.profile = profile;
     state.currentProject = profile.path || targetPath;
     if (projectPathInput) {
-      projectPathInput.value = state.currentProject;
+      projectPathInput.value = state.currentProject.split(/[/\\]/).filter(Boolean).pop() || state.currentProject;
+      projectPathInput.title = state.currentProject;
     }
     state.skillsList = profile.skills || [];
 
@@ -852,10 +921,29 @@ async function selectProject(projPath) {
     populateHistoryProjectOptions();
 
     renderProjectInfo(profile);
+    updateModeAvailability(profile);
     renderAutocompleteOptions('');
     updateNavHistoryBadge();
   } catch (e) {
+    if (state.currentProject !== targetPath) return;
     projectInfo.innerHTML = `<p class="text-warning">掃描失敗: ${e.message}</p>`;
+  }
+}
+
+function updateModeAvailability(profile) {
+  const harnessButton = Array.from(modeButtons).find(button => button.dataset.mode === 'harness-eval');
+  if (!harnessButton) return;
+
+  const hasHarness = Boolean(profile?.harness?.hasHarness);
+  harnessButton.classList.toggle('hidden', !hasHarness);
+  harnessButton.setAttribute('aria-hidden', String(!hasHarness));
+
+  if (!hasHarness && state.activeMode === 'harness-eval') {
+    const fallbackButton = Array.from(modeButtons).find(button => button.dataset.mode === 'diff-e2e');
+    modeButtons.forEach(button => button.classList.remove('active'));
+    fallbackButton?.classList.add('active');
+    state.activeMode = 'diff-e2e';
+    updateModeView({ clearCases: true });
   }
 }
 
@@ -1012,13 +1100,14 @@ async function generateFlowAndCases() {
 
   btnGenerateFlow.disabled = true;
   btnGenerateFlow.innerHTML = '<span>正在分析架構並生成流程...</span>';
+  const requestMode = state.activeMode;
+  const requestProject = state.currentProject;
 
   try {
     const payload = {
       mode: state.activeMode,
       projectPath: state.currentProject,
-      skillPath: state.selectedSkill?.path,
-      harnessScript: 'npm run harness:check'
+      skillPath: state.selectedSkill?.path
     };
 
     const res = await fetch('/api/cases/preview', {
@@ -1027,7 +1116,9 @@ async function generateFlowAndCases() {
       body: JSON.stringify(payload)
     });
     const previewData = await res.json();
+    if (requestMode !== state.activeMode || requestProject !== state.currentProject) return;
     state.currentCases = previewData.plannedCases || [];
+    resetCaseResultsView();
 
     // 更新流程管線
     flowStatusBadge.textContent = '測案已生成 (就緒)';
@@ -1067,8 +1158,74 @@ async function generateFlowAndCases() {
   }
 }
 
+function resetCaseResultsView() {
+  state.caseView.query = '';
+  state.caseView.status = 'all';
+  state.caseView.page = 1;
+  if (caseSearchInput) caseSearchInput.value = '';
+  if (caseStatusFilter) caseStatusFilter.value = 'all';
+}
+
+function clearCaseResults() {
+  state.currentCases = [];
+  state.selectedCaseId = null;
+  resetCaseResultsView();
+  caseResultsToolbar?.classList.add('hidden');
+  if (caseMasterList) caseMasterList.innerHTML = '';
+}
+
 function renderCaseBlocks(cases) {
-  caseMasterList.innerHTML = cases.map(c => `
+  const useCompactCards = state.activeMode === 'diff-e2e';
+  const useBulkView = state.activeMode === 'diff-e2e' && cases.length > 10;
+  caseResultsToolbar?.classList.toggle('hidden', !useBulkView);
+  caseMasterList.classList.toggle('bulk-case-list', useBulkView);
+  caseMasterList.classList.toggle('compact-case-list', useCompactCards);
+
+  let visibleCases = cases;
+  if (useBulkView) {
+    const counts = cases.reduce((summary, testCase) => {
+      summary[testCase.status] = (summary[testCase.status] || 0) + 1;
+      return summary;
+    }, {});
+    caseResultStats.innerHTML = `
+      <span><strong>${cases.length}</strong> 全部</span>
+      <span class="text-success"><strong>${counts.PASS || 0}</strong> 已擊殺</span>
+      <span class="text-warning"><strong>${counts.FAIL || 0}</strong> 存活</span>
+      <span><strong>${counts.INCONCLUSIVE || 0}</strong> 無效</span>
+    `;
+    visibleCases = cases.filter(testCase => {
+      const matchesStatus = state.caseView.status === 'all' || testCase.status === state.caseView.status;
+      const searchable = `${testCase.id} ${testCase.name} ${testCase.input} ${testCase.delta}`.toLowerCase();
+      return matchesStatus && searchable.includes(state.caseView.query);
+    });
+  }
+
+  const totalPages = useBulkView ? Math.max(1, Math.ceil(visibleCases.length / state.caseView.pageSize)) : 1;
+  state.caseView.page = Math.min(state.caseView.page, totalPages);
+  const pageStart = (state.caseView.page - 1) * state.caseView.pageSize;
+  const pageCases = useBulkView
+    ? visibleCases.slice(pageStart, pageStart + state.caseView.pageSize)
+    : visibleCases;
+  if (useBulkView) {
+    casePageInfo.textContent = `${visibleCases.length} 筆 · 第 ${state.caseView.page} / ${totalPages} 頁`;
+    casePrevPage.disabled = state.caseView.page <= 1;
+    caseNextPage.disabled = state.caseView.page >= totalPages;
+  }
+
+  const emptyMessage = cases.length === 0 ? '尚未生成測案' : '沒有符合條件的測案';
+  caseMasterList.innerHTML = pageCases.length > 0 ? pageCases.map(c => useCompactCards ? `
+    <div class="case-item-card compact-case-card ${c.status === 'FAIL' ? 'status-fail' : ''} ${state.selectedCaseId === c.id ? 'selected' : ''}" data-case-id="${c.id}">
+      <div class="compact-case-heading">
+        <span class="case-item-id">${c.id}</span>
+        <span class="compact-case-divider">｜</span>
+        <span class="compact-case-type">${c.type}</span>
+      </div>
+      <div class="compact-case-result">
+        <span class="compact-case-summary">${c.name}：<strong class="compact-case-status status-${(c.status || '').toLowerCase()}">${c.status === 'PASS' ? 'Killed' : c.status === 'FAIL' ? 'Survived' : c.status === 'INCONCLUSIVE' ? 'Invalid' : '待執行'}</strong></span>
+        <span class="case-item-action-pill">[檢視]</span>
+      </div>
+    </div>
+  ` : `
     <div class="case-item-card ${c.status === 'FAIL' ? 'status-fail' : ''} ${state.selectedCaseId === c.id ? 'selected' : ''}" data-case-id="${c.id}">
       <div class="case-item-top">
         <span class="case-item-id">${c.id}</span>
@@ -1083,7 +1240,7 @@ function renderCaseBlocks(cases) {
         <span class="case-item-action-pill">[ 點選檢視細節 ➔ ]</span>
       </div>
     </div>
-  `).join('');
+  `).join('') : `<div class="case-results-empty">${emptyMessage}</div>`;
 
   // 點選左側卡片切換右側細節
   caseMasterList.querySelectorAll('.case-item-card').forEach(card => {
@@ -1098,16 +1255,50 @@ function renderCaseBlocks(cases) {
 }
 
 // 6. [第二階段] 批准測案並開始實體執行
+function formatDuration(durationMs) {
+  const totalSeconds = Math.max(0, Math.ceil(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes} 分 ${seconds} 秒` : `${seconds} 秒`;
+}
+
+function updateEvaluationProgressDisplay() {
+  if (!state.evaluationProgress || !state.evaluationStartedAt) return;
+  const { message, percent, estimatedMaxMs } = state.evaluationProgress;
+  const elapsed = formatDuration(Date.now() - state.evaluationStartedAt);
+  const limit = Number.isFinite(estimatedMaxMs)
+    ? ` · 測試逾時上限約 ${formatDuration(estimatedMaxMs)}`
+    : '';
+  const text = `${message} (${percent}%) · 已執行 ${elapsed}${limit}`;
+  flowStatusBadge.textContent = text;
+  const buttonLabel = btnExecutePlan.querySelector('span');
+  if (buttonLabel) buttonLabel.textContent = text;
+}
+
 async function executeTestFlow() {
   if (!state.currentProject) return;
 
+  const evaluationId = globalThis.crypto?.randomUUID?.()
+    && `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  state.activeEvaluationId = evaluationId;
+  state.evaluationStartedAt = Date.now();
+  state.evaluationProgress = { message: '準備執行', percent: 0, estimatedMaxMs: null };
   btnExecutePlan.disabled = true;
   btnExecutePlan.innerHTML = '<span>正在實體執行、破壞注入與比對品質...</span>';
+  if (state.activeMode !== 'skill-eval') {
+    flowStatusBadge.className = 'badge badge-warning';
+    renderFlowTrack(getModeFlow(), 0);
+    updateEvaluationProgressDisplay();
+  }
+  const progressTimer = state.activeMode === 'skill-eval'
+    ? null
+    : setInterval(updateEvaluationProgressDisplay, 1000);
 
   try {
     let endpoint = '/api/run/diff-e2e';
     let payload = {
       projectPath: state.currentProject,
+      evaluationId,
       mutations: [
         { type: 'Invert condition', pattern: '===' },
         { type: 'Flip boolean', pattern: 'true' }
@@ -1130,7 +1321,6 @@ async function executeTestFlow() {
     } else if (state.activeMode === 'harness-eval') {
       endpoint = '/api/run/harness-eval';
       payload.projectPath = state.currentProject;
-      payload.harnessScript = 'npm run harness:check';
     }
 
     let res = await fetch(endpoint, {
@@ -1142,7 +1332,7 @@ async function executeTestFlow() {
     if (runResult.status === 'PENDING_AGENT') {
       flowStatusBadge.textContent = '等待 Agent 實際執行';
       flowStatusBadge.className = 'badge badge-warning';
-      fseventStatus.textContent = `Agent 評測已排入佇列: ${runResult.jobId}`;
+      updateSentinelStatus(`Agent 評測已排入佇列: ${runResult.jobId}`, true);
       const completed = await waitForAgentEvaluation(runResult.jobId, state.currentProject);
       const observations = new Map(completed.result.observations.map(item => [String(item.id), item]));
       payload.cases = completed.evaluationCases.map(testCase => {
@@ -1175,17 +1365,13 @@ async function executeTestFlow() {
 
     // 將實測結果覆蓋至測案清單
     state.currentCases = runResult.result?.caseComparisons || runResult.caseComparisons || [];
+    resetCaseResultsView();
+    casesCountBadge.textContent = `${state.currentCases.length} 個測案`;
 
     // 更新流程管線為全數完成
     flowStatusBadge.textContent = '實體檢定完成 (Verified)';
     flowStatusBadge.className = 'badge badge-success';
-    const steps = [
-      { step: 1, name: '輸入查詢', desc: '實體執行完成' },
-      { step: 2, name: '意圖匹配', desc: '信心指數計算完畢' },
-      { step: 3, name: 'Context 載入', desc: 'Token 負載已記錄' },
-      { step: 4, name: '品質評審', desc: '產出合規核算完成' }
-    ];
-    renderFlowTrack(steps, 4);
+    renderFlowTrack(getModeFlow(), 4);
 
     // 重新渲染測案卡片 (帶上 PASS/FAIL 與 Token 狀態)
     renderCaseBlocks(state.currentCases);
@@ -1222,8 +1408,14 @@ async function executeTestFlow() {
     scorecardSection.classList.remove('hidden');
     scorecardSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
+    flowStatusBadge.textContent = '執行失敗';
+    flowStatusBadge.className = 'badge badge-danger';
     alert(`執行失敗: ${e.message}`);
   } finally {
+    if (progressTimer) clearInterval(progressTimer);
+    if (state.activeEvaluationId === evaluationId) state.activeEvaluationId = null;
+    state.evaluationStartedAt = null;
+    state.evaluationProgress = null;
     btnExecutePlan.disabled = false;
     btnExecutePlan.innerHTML = `
       <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1351,18 +1543,42 @@ function renderScorecard(data) {
   };
 
   overallScorePill.textContent = `${scorecard.overallScore === null ? 'N/A' : scorecard.overallScore + ' / 100'} ${scorecard.rating}`;
-  metricVal1.textContent = scorecard.metrics.mutationKillRate === null ? 'N/A' : `${scorecard.metrics.mutationKillRate}%`;
-  metricVal2.textContent = scorecard.metrics.qualityScore === null ? 'N/A' : `${scorecard.metrics.qualityScore} 分`;
-  const tokenMeasurement = data.metrics?.tokenMeasurement;
-  metricVal3.textContent = scorecard.metrics.totalTokens || (tokenMeasurement?.status === 'UNAVAILABLE' ? 'N/A (Runtime 未提供)' : 'N/A');
-  metricVal3.title = tokenMeasurement?.reasons?.join('\n') || '';
-  metricVal4.textContent = data.status || scorecard.status || scorecard.rating || 'INCONCLUSIVE';
+  metricVal3.title = '';
 
-  if (state.activeMode === 'skill-eval') {
+  if (state.activeMode === 'diff-e2e') {
+    const killRate = scorecard.metrics?.mutationKillRate;
+    const silentErrors = scorecard.metrics?.silentErrorsCaught;
+    metricLbl1.textContent = '變異擊殺率';
+    metricVal1.textContent = Number.isFinite(killRate) ? `${killRate}%` : 'N/A';
+    metricLbl2.textContent = '未捕獲運行期錯誤';
+    metricVal2.textContent = Number.isFinite(silentErrors) ? String(silentErrors) : 'N/A (未量測)';
+    metricLbl3.textContent = 'Runtime 安全網證據';
+    metricVal3.textContent = scorecard.evidence?.runtimeSafety || 'NOT_MEASURED';
+    metricLbl4.textContent = '評測狀態';
+    metricVal4.textContent = scorecard.status || scorecard.rating || 'INCONCLUSIVE';
+  } else if (state.activeMode === 'skill-eval') {
+    const tokenMeasurement = data.metrics?.tokenMeasurement;
+    metricVal1.textContent = Number.isFinite(scorecard.metrics?.mutationKillRate) ? `${scorecard.metrics.mutationKillRate}%` : 'N/A';
+    metricVal2.textContent = Number.isFinite(scorecard.metrics?.qualityScore) ? `${scorecard.metrics.qualityScore} 分` : 'N/A';
+    metricVal3.textContent = scorecard.metrics?.totalTokens || (tokenMeasurement?.status === 'UNAVAILABLE' ? 'N/A (Runtime 未提供)' : 'N/A');
+    metricVal3.title = tokenMeasurement?.reasons?.join('\n') || '';
+    metricVal4.textContent = data.status || scorecard.status || scorecard.rating || 'INCONCLUSIVE';
     metricLbl1.textContent = data.status === 'MEASURED' ? '實測召回率' : '啟發式命中率';
     metricLbl2.textContent = '產出品質平均分';
     metricLbl3.textContent = '本次實測總消耗';
     metricLbl4.textContent = '證據狀態';
+  } else {
+    const checks = Array.isArray(data.checks) ? data.checks : [];
+    const faultCheck = checks.find(check => check.name?.includes('Fault Sensitivity'));
+    const idempotencyCheck = checks.find(check => check.name?.includes('Idempotency'));
+    metricLbl1.textContent = 'Harness 健康度';
+    metricVal1.textContent = Number.isFinite(data.healthScore) ? `${data.healthScore}%` : 'N/A';
+    metricLbl2.textContent = '故障阻斷';
+    metricVal2.textContent = faultCheck?.passed === true ? 'PASS' : (faultCheck?.passed === false ? 'FAIL' : 'NOT_EVALUATED');
+    metricLbl3.textContent = '環境冪等性';
+    metricVal3.textContent = idempotencyCheck?.passed === true ? 'PASS' : (idempotencyCheck?.passed === false ? 'FAIL' : 'NOT_EVALUATED');
+    metricLbl4.textContent = '評測狀態';
+    metricVal4.textContent = data.status || 'INCONCLUSIVE';
   }
 
   insightsList.innerHTML = (scorecard.insights || []).map(i => `<li>${i}</li>`).join('');
@@ -1371,13 +1587,28 @@ function renderScorecard(data) {
 // 9. SSE
 function setupSSE() {
   const eventSource = new EventSource('/api/events');
-  eventSource.addEventListener('project_change', event => {
+  eventSource.addEventListener('evaluation_progress', event => {
     const data = JSON.parse(event.data);
-    fseventDot.style.backgroundColor = '#f59e0b';
-    fseventStatus.textContent = `檔案變更: ${data.filename} (即時喚醒)`;
+    if (!state.activeEvaluationId || data.evaluationId !== state.activeEvaluationId) return;
+
+    const percent = Number.isFinite(data.percent) ? data.percent : 0;
+    state.evaluationProgress = {
+      message: data.message,
+      percent,
+      estimatedMaxMs: Number.isFinite(data.estimatedMaxMs)
+        ? data.estimatedMaxMs
+        : state.evaluationProgress?.estimatedMaxMs
+    };
+    updateEvaluationProgressDisplay();
+    flowStatusBadge.className = percent >= 100 ? 'badge badge-success' : 'badge badge-warning';
+    renderFlowTrack(getModeFlow(data.mode), Math.max(0, Math.min(4, (data.step || 1) - 1)));
+  });
+  eventSource.addEventListener('project_change', event => {
+    if (state.activeMode !== 'skill-eval') return;
+    const data = JSON.parse(event.data);
+    updateSentinelStatus(`檔案變更: ${data.filename} (即時喚醒)`, true);
     setTimeout(() => {
-      fseventDot.style.backgroundColor = '#10b981';
-      fseventStatus.textContent = 'FSEvents 哨兵守候中 (0 Token)';
+      updateSentinelStatus();
     }, 1500);
   });
 }

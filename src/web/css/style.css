@@ -100,7 +100,7 @@ body {
 .top-nav {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 0.85rem 2rem;
   background-color: #000000;
   border-bottom: 1px solid var(--border-color);
@@ -135,6 +135,9 @@ body {
   padding: 0.25rem 0.35rem;
   border-radius: 4px;
   border: 1px solid var(--border-static);
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .nav-view-tab {
@@ -195,6 +198,15 @@ body {
   color: var(--text-muted);
   cursor: default;
   user-select: none;
+  position: absolute;
+  right: 2rem;
+  max-width: 28vw;
+}
+
+.sentinel-status .status-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pulse-dot {
@@ -936,6 +948,69 @@ body {
   gap: 0.65rem;
 }
 
+.case-master-list.bulk-case-list {
+  max-height: 72vh;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+}
+
+.case-results-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  background: #020802;
+  border: 1px solid var(--border-static);
+  border-radius: 4px;
+}
+
+.case-result-stats,
+.case-result-controls,
+.case-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.case-result-stats {
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.case-result-controls .case-search-input {
+  min-width: 0;
+  flex: 1;
+}
+
+.case-status-filter {
+  width: 105px;
+  flex: 0 0 105px;
+}
+
+.case-pagination {
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.case-pagination .btn {
+  width: 32px;
+  height: 28px;
+  font-size: 1.1rem;
+}
+
+.case-results-empty {
+  padding: 2rem 1rem;
+  border: 1px dashed var(--border-static);
+  color: var(--text-muted);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
 /* 測案由上往下排列的卡片 Case List Item (可點選卡片 - 互動元件) */
 .case-item-card {
   background-color: #000000;
@@ -966,6 +1041,67 @@ body {
 
 .case-item-card.status-fail {
   border-left-color: var(--accent-rose);
+}
+
+.compact-case-list {
+  gap: 0.35rem;
+}
+
+.compact-case-card {
+  padding: 0.45rem 0.65rem;
+}
+
+.compact-case-heading,
+.compact-case-result {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.compact-case-heading {
+  gap: 0.3rem;
+  margin-bottom: 0.2rem;
+  font-size: 0.72rem;
+}
+
+.compact-case-divider,
+.compact-case-type {
+  color: var(--text-muted);
+}
+
+.compact-case-type,
+.compact-case-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compact-case-result {
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.compact-case-summary {
+  color: #bbf7d0;
+  font-size: 0.78rem;
+}
+
+.compact-case-status.status-pass {
+  color: var(--border-interactive-bright);
+}
+
+.compact-case-status.status-fail {
+  color: var(--accent-rose);
+}
+
+.compact-case-status.status-inconclusive {
+  color: var(--text-muted);
+}
+
+.compact-case-card .case-item-action-pill {
+  flex: 0 0 auto;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.68rem;
 }
 
 .case-item-top {

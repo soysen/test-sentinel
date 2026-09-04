@@ -12,6 +12,7 @@ const path = require('path');
 const url = require('url');
 const os = require('os');
 const { exec } = require('child_process');
+const { Worker } = require('worker_threads');
 
 const { ProjectScanner } = require('../core/scanner');
 const { GitNexusBridge } = require('../core/gitnexus');
@@ -19,9 +20,7 @@ const { DiffAnalyzer } = require('../core/diff-analyzer');
 const { AstMockExtractor } = require('../core/mock-engine/ast-extractor');
 const { MockErrorHealer } = require('../core/mock-engine/error-healer');
 const { HarMockManager } = require('../core/mock-engine/har-manager');
-const { DiffE2ERunner } = require('../core/modes/diff-e2e-runner');
 const { SkillEvaluator } = require('../core/modes/skill-evaluator');
-const { HarnessAuditor } = require('../core/modes/harness-auditor');
 const { QualityScorer } = require('../core/scorer');
 const { ProjectWatcher } = require('../core/watcher');
 const { AgentEvalQueue } = require('../core/agent-eval-queue');
@@ -48,6 +47,37 @@ function sendSse(event, data) {
   for (const res of sseClients) {
     res.write(message);
   }
+}
+
+function runEvaluationWorker(mode, projectPath, options, onProgress) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(path.join(__dirname, 'evaluation-worker.js'), {
+      workerData: { mode, projectPath, options }
+    });
+    let settled = false;
+
+    worker.on('message', message => {
+      if (message.type === 'progress') {
+        onProgress(message.progress);
+        return;
+      }
+      if (message.type === 'result') {
+        settled = true;
+        resolve(message.result);
+        return;
+      }
+      if (message.type === 'error') {
+        settled = true;
+        reject(new Error(message.error));
+      }
+    });
+    worker.on('error', error => {
+      if (!settled) reject(error);
+    });
+    worker.on('exit', code => {
+      if (!settled && code !== 0) reject(new Error(`Evaluation worker exited with code ${code}`));
+    });
+  });
 }
 
 const server = http.createServer((req, res) => {
@@ -260,17 +290,26 @@ const server = http.createServer((req, res) => {
 
   // 模式 A: Diff E2E 跑測與變異打分
   if (pathname === '/api/run/diff-e2e' && req.method === 'POST') {
-    return readJsonBody((err, body) => {
+    return readJsonBody(async (err, body) => {
+      if (err) return jsonResponse({ error: 'Invalid JSON' }, 400);
       try {
         const projectPath = resolveUserPath(body.projectPath);
-        const runner = new DiffE2ERunner(projectPath);
+        const onProgress = progress => sendSse('evaluation_progress', {
+          evaluationId: body.evaluationId || null,
+          mode: 'diff-e2e',
+          ...progress
+        });
         const suppliedMutations = Array.isArray(body.mutations)
           ? body.mutations.filter(mutation => mutation.filePath && mutation.originalLine && mutation.mutatedLine)
           : [];
         const mutations = suppliedMutations.length > 0
           ? suppliedMutations
           : new DiffAnalyzer(projectPath).getDiff(body.scope || 'all').files.flatMap(file => file.mutationCandidates);
-        const result = runner.runEvaluation({ ...body, projectPath, mutations });
+        const result = await runEvaluationWorker('diff-e2e', projectPath, {
+          ...body,
+          projectPath,
+          mutations
+        }, onProgress);
 
         // 結合評分器
         const scorecard = QualityScorer.computeScorecard({
@@ -351,15 +390,23 @@ const server = http.createServer((req, res) => {
 
   // 模式 C: Harness 健檢
   if (pathname === '/api/run/harness-eval' && req.method === 'POST') {
-    return readJsonBody((err, body) => {
+    return readJsonBody(async (err, body) => {
+      if (err) return jsonResponse({ error: 'Invalid JSON' }, 400);
       try {
         const projectPath = resolveUserPath(body.projectPath);
-        const auditor = new HarnessAuditor(projectPath);
-        const report = auditor.auditHarness(body.harnessScript || 'npm test');
+        const onProgress = progress => sendSse('evaluation_progress', {
+          evaluationId: body.evaluationId || null,
+          mode: 'harness-eval',
+          ...progress
+        });
+        const report = await runEvaluationWorker('harness-eval', projectPath, {
+          customCommand: body.harnessScript || null,
+          faultTarget: body.faultTarget || null,
+        }, onProgress);
 
         // 儲存至歷史紀錄並計算基準差異
         const historyMgr = new HistoryManager(projectPath || process.cwd());
-        const targetName = (body.harnessScript || 'npm_test').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const targetName = (report.harnessScript || 'default_harness').replace(/[^a-zA-Z0-9_-]/g, '_');
         const baseline = historyMgr.getLatestBaseline('harness-eval', targetName);
         const saved = historyMgr.saveReport('harness-eval', targetName, report);
         const diff = historyMgr.computeDiff(report, baseline);

@@ -22,11 +22,36 @@ const { AgentEvalQueue } = require('../src/core/agent-eval-queue');
 
 console.log('🧪 Starting Test Sentinel Self-Verification Suite...\n');
 
+const dashboardHtml = fs.readFileSync(path.resolve(__dirname, '../src/web/index.html'), 'utf8');
+assert(dashboardHtml.includes('<div id="caseResultsToolbar" class="case-results-toolbar hidden">'), 'Case result toolbar must use a valid opening div tag');
+assert(!dashboardHtml.includes('>=div id="caseResultsToolbar"'), 'Case result toolbar tag must not render as visible text');
+const dashboardScript = fs.readFileSync(path.resolve(__dirname, '../src/web/js/app.js'), 'utf8');
+assert(!dashboardScript.includes('class="compact-case-summary"<='), 'Compact case summary must use a valid opening span tag');
+assert(!dashboardScript.includes('</strong<=</span<='), 'Compact case summary must use valid closing tags');
+
 // 1. Scanner Test
 console.log('1. Testing ProjectScanner...');
 const scanner = new ProjectScanner(path.resolve(__dirname, '..'));
 const profile = scanner.scan();
 assert(profile.name === 'test-sentinel', 'Scanner should detect project name');
+const scannerFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinel-scanner-'));
+fs.writeFileSync(path.join(scannerFixture, 'package.json'), JSON.stringify({ scripts: { test: 'node test.js' } }));
+assert(new ProjectScanner(scannerFixture).scan().harness.hasHarness === false, 'Generic test script must not be treated as Harness configuration');
+fs.writeFileSync(path.join(scannerFixture, 'package.json'), JSON.stringify({ scripts: { 'harness:check': 'node harness.js' } }));
+const harnessProfile = new ProjectScanner(scannerFixture).scan();
+assert(harnessProfile.harness.hasHarness === true, 'harness:check script should enable Harness mode');
+assert(harnessProfile.harness.command === 'npm run harness:check', 'Scanner should expose the detected Harness command');
+fs.writeFileSync(path.join(scannerFixture, 'package.json'), JSON.stringify({ scripts: { test: 'node test.js' } }));
+fs.mkdirSync(path.join(scannerFixture, '.github', 'harness'), { recursive: true });
+const emptyGithubHarnessProfile = new ProjectScanner(scannerFixture).scan();
+assert(emptyGithubHarnessProfile.harness.hasHarness === false, 'Empty .github/harness must not enable Harness mode');
+assert(emptyGithubHarnessProfile.harness.githubHarnessExists === true, 'Scanner should report an empty .github/harness directory');
+fs.writeFileSync(path.join(scannerFixture, '.github', 'harness', 'check.sh'), '#!/bin/sh\nexit 0\n');
+const githubHarnessProfile = new ProjectScanner(scannerFixture).scan();
+assert(githubHarnessProfile.harness.hasHarness === true, '.github/harness should enable Harness mode');
+assert(githubHarnessProfile.harness.githubHarnessExists === true, 'Scanner should report .github/harness presence');
+assert(githubHarnessProfile.harness.command === 'bash .github/harness/check.sh', 'Scanner should expose a .github/harness script command');
+fs.rmSync(scannerFixture, { recursive: true, force: true });
 console.log('   ✅ Scanner verified. Recommended modes:', profile.recommendedModes);
 
 // 2. AST Mock Extractor Test (解法 2)
@@ -77,8 +102,10 @@ const inconclusiveResult = e2eRunner.runEvaluation({ mutations: [] });
 assert(inconclusiveResult.status === 'INCONCLUSIVE', 'Missing test command must be inconclusive');
 assert(inconclusiveResult.mutationResults.killRate === null, 'Unmeasured kill rate must be null');
 const originalSubject = fs.readFileSync(path.join(diffFixture, 'subject.js'), 'utf8');
+const diffProgress = [];
 const evalResult = e2eRunner.runEvaluation({
   testCommand: 'node subject.test.js',
+  onProgress: progress => diffProgress.push(progress),
   mutations: [
     {
       type: 'Flip exported boolean',
@@ -98,6 +125,15 @@ assert(evalResult.status === 'MEASURED', 'Valid mutations should produce measure
 assert(evalResult.mutationResults.killedCount === 1, 'Behavior mutation should be killed');
 assert(evalResult.mutationResults.survivedCount === 1, 'Unused mutation should survive');
 assert(evalResult.mutationResults.killRate === 50, 'Kill rate should reflect killed and survived mutants');
+assert(evalResult.probeExecution.status === 'NOT_MEASURED', 'Passing tests must not imply that the generated browser probe ran');
+assert(evalResult.silentErrorsCaught === null, 'Runtime errors must remain unmeasured without probe execution evidence');
+assert(evalResult.caseComparisons[0].evidence.restoredBaseline.passed === true, 'Killed mutation must be confirmed by a restored passing baseline');
+assert(e2eRunner.looksLikeInfrastructureFailure({ stdout: '', stderr: 'FATAL ERROR: heap out of memory', signal: null }) === true, 'Out-of-memory failures must be invalid infrastructure evidence');
+assert(e2eRunner.looksLikeInfrastructureFailure({ stdout: '', stderr: '', signal: 'SIGKILL' }) === true, 'Signal-terminated tests must be invalid infrastructure evidence');
+assert(e2eRunner.looksLikeInfrastructureFailure({ stdout: '', stderr: 'ENOSPC: no space left on device', signal: null }) === true, 'Disk exhaustion must be invalid infrastructure evidence');
+assert(diffProgress.some(progress => progress.phase === 'baseline'), 'Diff evaluation must report baseline progress');
+assert(diffProgress.filter(progress => progress.phase === 'mutation').length === 2, 'Diff evaluation must report each mutation progress');
+assert(diffProgress.at(-1).phase === 'complete', 'Diff evaluation must report completion');
 assert(fs.readFileSync(path.join(diffFixture, 'subject.js'), 'utf8') === originalSubject, 'Mutated source must be restored');
 fs.rmSync(diffFixture, { recursive: true, force: true });
 console.log('   ✅ Diff E2E Runner verified with killed/survived controls and restoration.');
@@ -160,12 +196,30 @@ const badScript = path.join(harnessFixture, 'bad-harness.sh');
 fs.writeFileSync(testScript, "#!/bin/bash\nset -e\nnode -e \"JSON.parse(require('fs').readFileSync('data/tasks.json', 'utf8'))\"\n");
 fs.writeFileSync(badScript, "#!/bin/bash\nnode -e \"JSON.parse(require('fs').readFileSync('data/tasks.json', 'utf8'))\" || true\n");
 const harnessAuditor = new HarnessAuditor(harnessFixture);
-const auditReport = harnessAuditor.auditHarness('bash ' + testScript);
+const harnessProgress = [];
+const auditReport = harnessAuditor.auditHarness('bash ' + testScript, {
+  onProgress: progress => harnessProgress.push(progress)
+});
 assert(auditReport.healthScore === 100, 'Harness health score should be 100');
 assert(auditReport.status === 'HEALTHY', 'Fault-sensitive harness should be healthy');
+assert(auditReport.checks.find(check => check.name.includes('Fault Sensitivity')).targetFile === 'data/tasks.json', 'Fault evidence must identify its target file');
+assert(harnessProgress.some(progress => progress.phase === 'fault-injection'), 'Harness evaluation must report fault injection progress');
+assert(harnessProgress.some(progress => progress.phase === 'idempotency'), 'Harness evaluation must report idempotency progress');
+assert(harnessProgress.at(-1).phase === 'complete', 'Harness evaluation must report completion');
 const badAuditReport = harnessAuditor.auditHarness('bash ' + badScript);
 assert(badAuditReport.status === 'UNHEALTHY', 'Harness that swallows failures must be unhealthy');
 assert(badAuditReport.checks.find(check => check.name.includes('Fault Sensitivity')).passed === false, 'Swallowed fault must be detected');
+const failedBaselineReport = harnessAuditor.auditHarness('node -e "process.exit(2)"');
+assert(failedBaselineReport.status === 'INCONCLUSIVE', 'Failed baseline must stop the harness evaluation');
+assert(failedBaselineReport.healthScore === null, 'Failed baseline must not receive a health score');
+assert(failedBaselineReport.checks.length === 1, 'Failed baseline must skip fault injection and idempotency checks');
+fs.unlinkSync(path.join(harnessFixture, 'data/tasks.json'));
+const missingFaultTargetReport = harnessAuditor.auditHarness('node -e "process.exit(0)"');
+assert(missingFaultTargetReport.status === 'INCONCLUSIVE', 'Missing fault target must be inconclusive');
+assert(missingFaultTargetReport.healthScore === null, 'Missing fault evidence must not receive a health score');
+assert(missingFaultTargetReport.checks.find(check => check.name.includes('Fault Sensitivity')).passed === null, 'Unavailable fault injection must not be counted as a failure');
+const invalidFaultTargetReport = harnessAuditor.auditHarness('node -e "process.exit(0)"', { faultTarget: '../outside.json' });
+assert(invalidFaultTargetReport.status === 'INCONCLUSIVE', 'Out-of-project fault target must be rejected');
 fs.rmSync(harnessFixture, { recursive: true, force: true });
 console.log('   ✅ Harness Auditor verified with healthy and swallowed-error controls.');
 
@@ -185,7 +239,8 @@ console.log(`   ✅ Quality Scorer verified. Evidence-based score: ${scorecard.o
 
 // 9. History Manager Test (持久化與基準對比)
 console.log('9. Testing HistoryManager (歷史分層持久化與基準對比)...');
-const historyManager = new HistoryManager(path.resolve(__dirname, '..'));
+const historyFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinel-history-'));
+const historyManager = new HistoryManager(historyFixture);
 const sampleReport1 = {
   overallScore: 88,
   metrics: { recall: 90, precision: 100, totalTokens: 1500 }
@@ -206,6 +261,13 @@ assert(diff.tokensSaved === true, 'Tokens should be saved');
 
 const historyList = historyManager.getHistoryList('test-mode', 'target-demo');
 assert(historyList.length >= 1, 'History list should contain at least 1 record');
+historyManager.saveReport('test-mode', 'target-inconclusive', { status: 'INCONCLUSIVE', overallScore: null });
+const inconclusiveHistory = historyManager.getHistoryList('test-mode', 'target-inconclusive');
+assert(inconclusiveHistory[0].overallScore === null, 'History must preserve an inconclusive null score');
+assert(inconclusiveHistory[0].status === 'INCONCLUSIVE', 'History must preserve inconclusive status');
+const inconclusiveDiff = historyManager.computeDiff({ overallScore: null }, sampleReport1);
+assert(inconclusiveDiff.scoreDelta === null, 'Score delta must be unavailable when either score is inconclusive');
 console.log(`   ✅ History Manager verified. Records: ${historyList.length}, Score Delta: +${diff.scoreDelta}, Tokens Delta: ${diff.tokensDelta}`);
+fs.rmSync(historyFixture, { recursive: true, force: true });
 
 console.log('\n🎉 ALL 9 MODULE VERIFICATION CHECKS PASSED!\n');

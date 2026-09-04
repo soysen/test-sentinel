@@ -114,8 +114,15 @@ class HistoryManager {
   }
 
   extractScore(data) {
-    if (!data) return 0;
-    return data.overallScore ?? data.scorecard?.overallScore ?? data.metrics?.overallScore ?? data.healthScore ?? 0;
+    if (!data) return null;
+    const candidates = [
+      data.overallScore,
+      data.scorecard?.overallScore,
+      data.metrics?.overallScore,
+      data.healthScore
+    ];
+    const score = candidates.find(candidate => candidate !== undefined);
+    return Number.isFinite(score) ? score : null;
   }
 
   extractTokens(data) {
@@ -157,7 +164,7 @@ class HistoryManager {
                 time: content.savedAt || content.timestamp,
                 overallScore: this.extractScore(content),
                 totalTokens: this.extractTokens(content),
-                status: content.status || (this.extractScore(content) >= 80 ? 'PASSED' : 'NEEDS_ATTENTION')
+                status: content.status || (this.extractScore(content) === null ? 'INCONCLUSIVE' : (this.extractScore(content) >= 80 ? 'PASSED' : 'NEEDS_ATTENTION'))
               });
             } catch (err) {}
           }
@@ -197,7 +204,7 @@ class HistoryManager {
           const content = JSON.parse(fs.readFileSync(filePath, 'utf8'));
           summary.time = content.savedAt || content.timestamp;
           summary.overallScore = this.extractScore(content);
-          summary.status = content.status || (summary.overallScore >= 80 ? 'PASSED' : 'NEEDS_ATTENTION');
+          summary.status = content.status || (summary.overallScore === null ? 'INCONCLUSIVE' : (summary.overallScore >= 80 ? 'PASSED' : 'NEEDS_ATTENTION'));
           summary.totalTokens = this.extractTokens(content);
         } catch (err) {}
 
@@ -228,7 +235,7 @@ class HistoryManager {
     const currentPrecision = current.discriminationResult?.precisionRate ?? current.metrics?.precision ?? null;
     const baselinePrecision = baseline.discriminationResult?.precisionRate ?? baseline.metrics?.precision ?? null;
 
-    const scoreDelta = currentScore - baselineScore;
+    const scoreDelta = currentScore === null || baselineScore === null ? null : currentScore - baselineScore;
     const tokensDelta = currentTokens - baselineTokens;
     const recallDelta = currentRecall === null || baselineRecall === null ? null : currentRecall - baselineRecall;
     const precisionDelta = currentPrecision === null || baselinePrecision === null ? null : currentPrecision - baselinePrecision;
@@ -238,7 +245,7 @@ class HistoryManager {
       tokensDelta,
       recallDelta,
       precisionDelta,
-      scoreImproved: scoreDelta >= 0,
+      scoreImproved: scoreDelta === null ? null : scoreDelta >= 0,
       tokensSaved: tokensDelta < 0,
       baselineTime: baseline.savedAt || baseline.timestamp
     };

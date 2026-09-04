@@ -42,7 +42,7 @@
 
       <div class="sentinel-status">
         <span class="pulse-dot active" id="fseventDot"></span>
-        <span class="status-label" id="fseventStatus">FSEvents 哨兵守候中 (0 Token)</span>
+        <span class="status-label" id="fseventStatus">本機變異測試</span>
       </div>
     </header>
 
@@ -140,7 +140,7 @@
               <small>單檔搜尋、意圖與品質</small>
             </div>
           </button>
-          <button class="mode-btn" data-mode="harness-eval">
+          <button class="mode-btn hidden" data-mode="harness-eval" aria-hidden="true">
             <div class="mode-info">
               <strong>模式 C: Harness 健檢</strong>
               <small>實體故障注入與隔離性</small>
@@ -234,6 +234,23 @@
           <div class="master-detail-container mt-2">
             <!-- 左側：測案由上往下排列 -->
             <div class="case-master-column">
+              <div id="caseResultsToolbar" class="case-results-toolbar hidden">
+                <div id="caseResultStats" class="case-result-stats"></div>
+                <div class="case-result-controls">
+                  <input id="caseSearchInput" class="styled-input case-search-input" type="search" placeholder="搜尋 ID、檔案或變異..." aria-label="搜尋模式 A 測案">
+                  <select id="caseStatusFilter" class="styled-select case-status-filter" aria-label="依測案狀態篩選">
+                    <option value="all">全部狀態</option>
+                    <option value="PASS">已擊殺</option>
+                    <option value="FAIL">存活</option>
+                    <option value="INCONCLUSIVE">無效</option>
+                  </select>
+                </div>
+                <div class="case-pagination">
+                  <button id="casePrevPage" class="btn btn-icon btn-sm" type="button" title="上一頁" aria-label="上一頁">‹</button>
+                  <span id="casePageInfo">第 1 / 1 頁</span>
+                  <button id="caseNextPage" class="btn btn-icon btn-sm" type="button" title="下一頁" aria-label="下一頁">›</button>
+                </div>
+              </div>
               <div id="caseMasterList" class="case-master-list">
                 <!-- 測案卡片垂直由上往下排列動態生成 -->
               </div>

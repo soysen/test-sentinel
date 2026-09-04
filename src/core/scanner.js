@@ -23,7 +23,7 @@ class ProjectScanner {
     const frameworks = this.detectFrameworks(pkg);
     const testFrameworks = this.detectTesting(pkg);
     const skills = this.detectSkills();
-    const harness = this.detectHarness();
+    const harness = this.detectHarness(pkg);
 
     const recommendedModes = [];
     if (frameworks.length > 0 || testFrameworks.length > 0) {
@@ -206,12 +206,26 @@ class ProjectScanner {
     return skills;
   }
 
-  detectHarness() {
+  detectHarness(pkg = null) {
     const harnessMd = path.join(this.projectPath, 'HARNESS.md');
     const harnessDir = path.join(this.projectPath, 'harness');
+    const githubHarnessDir = path.join(this.projectPath, '.github', 'harness');
     const ghWorkflows = path.join(this.projectPath, '.github', 'workflows');
+    const candidateScripts = [
+      '.github/harness/harness_check.sh',
+      '.github/harness/check.sh',
+      '.github/harness/test.sh',
+      'scripts/harness_check.sh',
+      'scripts/test.sh',
+      'run_tests.sh',
+      'test.sh'
+    ];
+    const packageScript = pkg?.scripts?.['harness:check'] ? 'npm run harness:check' : null;
+    const scriptPath = candidateScripts.find(candidate => fs.existsSync(path.join(this.projectPath, candidate))) || null;
 
-    const hasHarness = fs.existsSync(harnessMd) || fs.existsSync(harnessDir);
+    const hasHarness = fs.existsSync(harnessMd)
+      || fs.existsSync(harnessDir)
+      || Boolean(packageScript || scriptPath);
     const workflows = [];
 
     if (fs.existsSync(ghWorkflows)) {
@@ -224,6 +238,8 @@ class ProjectScanner {
     return {
       hasHarness,
       harnessMdExists: fs.existsSync(harnessMd),
+      githubHarnessExists: fs.existsSync(githubHarnessDir),
+      command: packageScript || (scriptPath ? `bash ${scriptPath}` : null),
       workflows
     };
   }
