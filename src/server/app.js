@@ -10,6 +10,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const os = require('os');
+const { exec } = require('child_process');
 
 const { ProjectScanner } = require('../core/scanner');
 const { GitNexusBridge } = require('../core/gitnexus');
@@ -26,6 +28,16 @@ const { AgentEvalQueue } = require('../core/agent-eval-queue');
 
 const PORT = process.env.PORT || 3890;
 const PROJECTS_BASE = path.join(process.env.HOME || '/Users/nelsonchung', 'projects');
+
+function resolveUserPath(inputPath) {
+  if (!inputPath || typeof inputPath !== 'string') return process.cwd();
+  let resolved = inputPath.trim();
+  if (resolved.startsWith('~')) {
+    const home = os.homedir() || process.env.HOME || process.env.USERPROFILE || '';
+    resolved = path.join(home, resolved.slice(1));
+  }
+  return path.resolve(resolved);
+}
 
 // 儲存目前監聽中的專案
 let activeWatcher = null;
@@ -91,6 +103,9 @@ const server = http.createServer((req, res) => {
   if (pathname === "/api/cases/preview" && req.method === "POST") {
     return readJsonBody((err, body) => {
       try {
+        if (body.projectPath) {
+          body.projectPath = resolveUserPath(body.projectPath);
+        }
         const preview = getCasesPreview(body);
         return jsonResponse(preview);
       } catch (e) {
@@ -104,21 +119,62 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // API 路由
+  // API 路由: 取得已知/推薦專案清單 (包含當前目錄與 PROJECTS_BASE)
   if (pathname === '/api/projects/list' && req.method === 'GET') {
     try {
-      const items = fs.readdirSync(PROJECTS_BASE);
-      const projectList = items
-        .filter(f => !f.startsWith('.'))
-        .map(f => {
-          const fullPath = path.join(PROJECTS_BASE, f);
-          const isDir = fs.statSync(fullPath).isDirectory();
-          return isDir ? { name: f, path: fullPath } : null;
-        })
-        .filter(Boolean);
+      const projectList = [];
+      const currentDir = process.cwd();
+      projectList.push({ name: `${path.basename(currentDir)} (當前目錄)`, path: currentDir });
+
+      if (fs.existsSync(PROJECTS_BASE)) {
+        const items = fs.readdirSync(PROJECTS_BASE);
+        items
+          .filter(f => !f.startsWith('.'))
+          .forEach(f => {
+            const fullPath = path.join(PROJECTS_BASE, f);
+            try {
+              if (fs.statSync(fullPath).isDirectory() && fullPath !== currentDir) {
+                projectList.push({ name: f, path: fullPath });
+              }
+            } catch {}
+          });
+      }
       return jsonResponse(projectList);
     } catch (e) {
-      return jsonResponse({ error: e.message }, 500);
+      return jsonResponse([{ name: path.basename(process.cwd()), path: process.cwd() }]);
+    }
+  }
+
+  // 系統目錄選取對話框 (支援 macOS / Windows / Linux)
+  if (pathname === '/api/projects/choose-dialog' && req.method === 'POST') {
+    if (process.platform === 'darwin') {
+      exec(`osascript -e 'POSIX path of (choose folder with prompt "請選擇專案目錄")'`, (err, stdout, stderr) => {
+        if (err) {
+          if (stderr && (stderr.includes('User canceled') || stderr.includes('cancelled') || stderr.includes('-128'))) {
+            return jsonResponse({ canceled: true });
+          }
+          return jsonResponse({ error: err.message || '無法開啟目錄選取視窗' }, 500);
+        }
+        const chosen = stdout.trim();
+        return jsonResponse({ path: chosen });
+      });
+      return;
+    } else if (process.platform === 'win32') {
+      const psCmd = `powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = '請選擇專案目錄'; if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"`;
+      exec(psCmd, (err, stdout) => {
+        if (err) return jsonResponse({ error: err.message }, 500);
+        const chosen = stdout.trim();
+        if (!chosen) return jsonResponse({ canceled: true });
+        return jsonResponse({ path: chosen });
+      });
+      return;
+    } else {
+      exec(`zenity --file-selection --directory --title="請選擇專案目錄"`, (err, stdout) => {
+        if (err) return jsonResponse({ canceled: true });
+        const chosen = stdout.trim();
+        return jsonResponse({ path: chosen });
+      });
+      return;
     }
   }
 
@@ -126,7 +182,14 @@ const server = http.createServer((req, res) => {
     return readJsonBody((err, body) => {
       if (err) return jsonResponse({ error: 'Invalid JSON' }, 400);
       try {
-        const targetPath = body.projectPath || PROJECTS_BASE;
+        const rawPath = body.projectPath || process.cwd();
+        const targetPath = resolveUserPath(rawPath);
+        if (!fs.existsSync(targetPath)) {
+          return jsonResponse({ error: `路徑不存在: ${targetPath}` }, 400);
+        }
+        if (!fs.statSync(targetPath).isDirectory()) {
+          return jsonResponse({ error: `指定路徑非目錄: ${targetPath}` }, 400);
+        }
         const scanner = new ProjectScanner(targetPath);
         const profile = scanner.scan();
 
@@ -148,7 +211,8 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/inspect/gitnexus' && req.method === 'POST') {
     return readJsonBody((err, body) => {
       try {
-        const bridge = new GitNexusBridge(body.projectPath);
+        const projectPath = resolveUserPath(body.projectPath);
+        const bridge = new GitNexusBridge(projectPath);
         const changes = bridge.detectChangedSymbols(body.scope || 'unstaged');
 
         let impact = null;
@@ -167,7 +231,8 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/inspect/diff' && req.method === 'POST') {
     return readJsonBody((err, body) => {
       try {
-        const analyzer = new DiffAnalyzer(body.projectPath);
+        const projectPath = resolveUserPath(body.projectPath);
+        const analyzer = new DiffAnalyzer(projectPath);
         const diffData = analyzer.getDiff(body.scope || 'all');
         return jsonResponse(diffData);
       } catch (e) {
@@ -178,11 +243,12 @@ const server = http.createServer((req, res) => {
 
   if (pathname === '/api/agent-eval/status' && req.method === 'GET') {
     try {
-      const projectPath = parsedUrl.searchParams.get('projectPath');
+      const rawProjectPath = parsedUrl.searchParams.get('projectPath');
       const jobId = parsedUrl.searchParams.get('jobId');
-      if (!projectPath || !jobId) {
+      if (!rawProjectPath || !jobId) {
         return jsonResponse({ error: 'projectPath and jobId are required' }, 400);
       }
+      const projectPath = resolveUserPath(rawProjectPath);
       const status = new AgentEvalQueue(projectPath).getStatus(jobId);
       return status
         ? jsonResponse(status)
@@ -196,14 +262,15 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/run/diff-e2e' && req.method === 'POST') {
     return readJsonBody((err, body) => {
       try {
-        const runner = new DiffE2ERunner(body.projectPath);
+        const projectPath = resolveUserPath(body.projectPath);
+        const runner = new DiffE2ERunner(projectPath);
         const suppliedMutations = Array.isArray(body.mutations)
           ? body.mutations.filter(mutation => mutation.filePath && mutation.originalLine && mutation.mutatedLine)
           : [];
         const mutations = suppliedMutations.length > 0
           ? suppliedMutations
-          : new DiffAnalyzer(body.projectPath).getDiff(body.scope || 'all').files.flatMap(file => file.mutationCandidates);
-        const result = runner.runEvaluation({ ...body, mutations });
+          : new DiffAnalyzer(projectPath).getDiff(body.scope || 'all').files.flatMap(file => file.mutationCandidates);
+        const result = runner.runEvaluation({ ...body, projectPath, mutations });
 
         // 結合評分器
         const scorecard = QualityScorer.computeScorecard({
@@ -214,7 +281,7 @@ const server = http.createServer((req, res) => {
         });
 
         // 儲存至歷史紀錄並計算基準差異
-        const historyMgr = new HistoryManager(body.projectPath || process.cwd());
+        const historyMgr = new HistoryManager(projectPath || process.cwd());
         const targetName = body.targetFile ? path.basename(body.targetFile) : 'all-diffs';
         const baseline = historyMgr.getLatestBaseline('diff-e2e', targetName);
         const saved = historyMgr.saveReport('diff-e2e', targetName, { result, scorecard });
@@ -231,18 +298,19 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/run/skill-eval' && req.method === 'POST') {
     return readJsonBody((err, body) => {
       try {
+        const projectPath = resolveUserPath(body.projectPath);
         const cases = Array.isArray(body.cases) ? body.cases : [];
         const hasRouterObservations = cases.length > 0
           && cases.every(testCase => typeof testCase.triggered === 'boolean');
         if (!hasRouterObservations && body.agentEvaluation !== false) {
-          const queue = new AgentEvalQueue(body.projectPath);
+          const queue = new AgentEvalQueue(projectPath);
           const job = queue.createSkillJob({
             skillPath: body.skillPath,
             skillName: body.skillName,
             cases
           });
           sendSse('agent_eval_requested', {
-            projectPath: body.projectPath,
+            projectPath: projectPath,
             jobId: job.jobId,
             mode: job.mode
           });
@@ -254,11 +322,11 @@ const server = http.createServer((req, res) => {
           }, 202);
         }
 
-        const evaluator = new SkillEvaluator(body.projectPath);
+        const evaluator = new SkillEvaluator(projectPath);
         const report = evaluator.evaluateSkill(body.skillPath, cases);
 
         // 儲存至歷史紀錄並計算基準差異
-        const historyMgr = new HistoryManager(body.projectPath || process.cwd());
+        const historyMgr = new HistoryManager(projectPath || process.cwd());
         let targetName = body.skillName;
         if (!targetName && body.skillPath) {
           const bName = path.basename(body.skillPath);
@@ -285,11 +353,12 @@ const server = http.createServer((req, res) => {
   if (pathname === '/api/run/harness-eval' && req.method === 'POST') {
     return readJsonBody((err, body) => {
       try {
-        const auditor = new HarnessAuditor(body.projectPath);
+        const projectPath = resolveUserPath(body.projectPath);
+        const auditor = new HarnessAuditor(projectPath);
         const report = auditor.auditHarness(body.harnessScript || 'npm test');
 
         // 儲存至歷史紀錄並計算基準差異
-        const historyMgr = new HistoryManager(body.projectPath || process.cwd());
+        const historyMgr = new HistoryManager(projectPath || process.cwd());
         const targetName = (body.harnessScript || 'npm_test').replace(/[^a-zA-Z0-9_-]/g, '_');
         const baseline = historyMgr.getLatestBaseline('harness-eval', targetName);
         const saved = historyMgr.saveReport('harness-eval', targetName, report);

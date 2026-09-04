@@ -271,6 +271,66 @@ body {
   width: 100%;
 }
 
+.project-path-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.project-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.project-path-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  background-color: #000000;
+  border: 1px solid var(--border-interactive);
+  border-radius: 4px;
+  padding: 0 0.65rem;
+  color: var(--text-bright);
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.project-path-input:focus {
+  border-color: var(--border-interactive-bright);
+  box-shadow: var(--border-interactive-glow);
+  background-color: #020a02;
+}
+
+.project-path-input::placeholder {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.project-path-input::-webkit-calendar-picker-indicator,
+.project-path-input::-webkit-list-button {
+  display: none !important;
+  opacity: 0 !important;
+  -webkit-appearance: none !important;
+}
+
+.project-action-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
 .styled-select {
   flex: 1;
   min-width: 0;
@@ -300,10 +360,11 @@ body {
   font-family: var(--font-mono);
 }
 
-.project-select-row .btn-icon {
+.project-select-row .btn-icon,
+.project-path-box .btn-icon {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -316,7 +377,8 @@ body {
   transition: all 0.15s ease;
 }
 
-.project-select-row .btn-icon:hover {
+.project-select-row .btn-icon:hover,
+.project-path-box .btn-icon:hover {
   color: #000000;
   border-color: var(--border-interactive-bright);
   background-color: var(--border-interactive-bright);
@@ -481,6 +543,30 @@ body {
   font-family: var(--font-mono);
   caret-color: var(--border-interactive-bright);
   cursor: text;
+}
+
+.clear-skill-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem;
+  margin-right: 0.2rem;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.clear-skill-btn:hover {
+  color: #ff4d4f;
+  background-color: rgba(255, 77, 79, 0.15);
+}
+
+.clear-svg {
+  width: 13px;
+  height: 13px;
 }
 
 .dropdown-arrow-btn {

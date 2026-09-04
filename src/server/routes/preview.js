@@ -4,12 +4,23 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { DiffAnalyzer } = require('../../core/diff-analyzer');
 const { SkillEvaluator } = require('../../core/modes/skill-evaluator');
 const { HarnessAuditor } = require('../../core/modes/harness-auditor');
 
+function resolveUserPath(inputPath) {
+  if (!inputPath || typeof inputPath !== 'string') return process.cwd();
+  let resolved = inputPath.trim();
+  if (resolved.startsWith('~')) {
+    const home = os.homedir() || process.env.HOME || process.env.USERPROFILE || '';
+    resolved = path.join(home, resolved.slice(1));
+  }
+  return path.resolve(resolved);
+}
+
 function getCasesPreview({ mode, projectPath, skillPath, harnessScript }) {
-  const resolvedProject = path.resolve(projectPath);
+  const resolvedProject = resolveUserPath(projectPath);
 
   if (mode === 'diff-e2e') {
     const analyzer = new DiffAnalyzer(resolvedProject);

@@ -4,7 +4,18 @@
  */
 
 const path = require('path');
+const os = require('os');
 const { HistoryManager } = require('../../core/history-manager');
+
+function resolveUserPath(inputPath) {
+  if (!inputPath || typeof inputPath !== 'string') return process.cwd();
+  let resolved = inputPath.trim();
+  if (resolved.startsWith('~')) {
+    const home = os.homedir() || process.env.HOME || process.env.USERPROFILE || '';
+    resolved = path.join(home, resolved.slice(1));
+  }
+  return path.resolve(resolved);
+}
 
 function handleHistoryRoutes(req, res, parsedUrl, readJsonBody, jsonResponse) {
   const pathname = parsedUrl.pathname;
@@ -12,7 +23,8 @@ function handleHistoryRoutes(req, res, parsedUrl, readJsonBody, jsonResponse) {
     return false;
   }
 
-  const projectPath = parsedUrl.searchParams.get('project') || process.cwd();
+  const rawProject = parsedUrl.searchParams.get('project') || process.cwd();
+  const projectPath = resolveUserPath(rawProject);
   const historyMgr = new HistoryManager(projectPath);
   const mode = parsedUrl.searchParams.get('mode') || 'generic';
   const target = parsedUrl.searchParams.get('target') || 'default';

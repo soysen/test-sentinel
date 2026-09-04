@@ -59,33 +59,130 @@ Web 會等待回寫，收到完整結果後才產生 `MEASURED` 分數。詳細�
 
 ---
 
-## 🚀 快速啟動
+## 🚀 使用者操作指南
 
-### 1. 啟動 Web 視覺化儀表板
+### 使用前準備
+
+- Node.js 18 以上版本（核心平台不需安裝 npm 套件）。
+- 待測專案需位於本機，且建議先確認自身測試可正常執行。
+- Web 儀表板支援輸入/貼上任何本機專案路徑、點選資料夾按鈕瀏覽選取，或直接從最近使用清單切換。
+- 模式 A 需要待測專案提供 `test:e2e`、`e2e` 或 `test` npm script。若測試使用 Playwright，依賴與瀏覽器也必須已在待測專案中備妥。
+- 模式 B 的完整實測需要 Desktop Agent 配合；若未回寫真實路由結果，只會得到 `HEURISTIC`，不能當作正式品質門禁。
+
+Test Sentinel 本身沒有外部依賴，下載後可直接啟動：
+
 ```bash
+cd /path/to/test-sentinel
 npm start
-# 或 node src/server/app.js
-# 開啟瀏覽器訪問: http://localhost:3890
 ```
 
-### 2. CLI 模式
+瀏覽器開啟 [http://localhost:3890](http://localhost:3890)。如需改用其他連接埠：
+
 ```bash
-# 掃描專案架構指紋
+PORT=4000 npm start
+```
+
+### 選擇評測模式
+
+| 使用情境 | 建議模式 | 主要結果 |
+| --- | --- | --- |
+| 想確認目前 Git 變更是否被測試有效保護 | 模式 A：Git Diff E2E | 基線結果、變異擊殺率、靜默錯誤 |
+| 想確認 `SKILL.md` 是否會在正確情境觸發且產出合格 | 模式 B：Skill 效益評測 | Recall、Precision、品質與 Token 數據 |
+| 想檢查測試流程遇到錯誤時能否正確中斷且可重複執行 | 模式 C：Harness 健檢 | 故障注入、冪等性與健康分數 |
+
+### Web 儀表板操作流程
+
+1. 在左側「目標專案」選擇待測專案。平台會掃描框架、測試設定與可用 Skill，並開始監聽專案變更。
+2. 選擇模式 A、B 或 C。模式 B 還需要從搜尋欄選擇要評測的 Skill。
+3. 點擊「1. 生成測試流程與測案」。先檢查每個測案的目的、輸入與預期結果；輸入內容可直接編輯，也可還原預設值。
+4. 點擊「2. 批准測案並開始實體執行」。執行期間不要關閉儀表板。
+5. 在評分卡確認證據狀態與各項指標。完成的報告會自動存入待測專案的 `.test-eval/history/`。
+6. 切換到「歷史紀錄中心」，依專案、模式與目標篩選紀錄，查看歷次結果及相對基準差異。
+
+模式 A 執行時會在待測專案的 `.test-eval/diff-probes/` 建立隔離探針，並短暫修改變異候選行來檢驗測試；每次變異執行後都會還原原始內容。為避免與其他寫入作業互相干擾，評測期間不要同時修改待測檔案。
+
+### 模式 B：Desktop Agent 實測
+
+先在另一個終端布防 watcher：
+
+```bash
+cd /path/to/test-sentinel
+npm run agent:watch -- /path/to/target-project
+```
+
+接著回到 Web 儀表板：
+
+1. 選擇模式 B 與目標 Skill，生成測案。
+2. 複製畫面中的「Desktop Agent 啟動 Prompt」，貼到 Desktop Agent。
+3. 批准執行後，watcher 會在收到 job 時輸出 job ID 並結束。
+4. Agent 依 Prompt 執行每個 query 並回寫結果；Web 收到完整結果後才會顯示 `MEASURED` 分數。
+
+若需手動處理 Agent job，可使用：
+
+```bash
+npm run agent:next -- /path/to/target-project
+npm run agent:complete -- /path/to/target-project <jobId> <result.json>
+```
+
+每個 query 必須在獨立 Agent context 執行，且不得讀取 `.test-eval/agent-jobs/*.labels.json`。完整格式與步驟請見 [Agent 實測協議](docs/AGENT_EVALUATION.md)。
+
+### CLI 操作
+
+CLI 適合自動化、CI 或待測專案不在 `~/projects/` 時使用。
+
+```bash
+# 掃描專案架構、測試能力與 Skill
 node src/cli/test-sentinel.js scan /path/to/project
 
-# 執行 Git Diff E2E 探針與變異測試
+# 模式 A：評測所有 Git diff
 node src/cli/test-sentinel.js run diff-e2e /path/to/project
 
-# 執行 Skill 效益評測
+# 模式 B：評測第一個找到的 Skill
 node src/cli/test-sentinel.js run skill-eval /path/to/project
 
-# 執行 Harness 健檢
+# 模式 B：指定 Skill 名稱或 SKILL.md 路徑
+node src/cli/test-sentinel.js run skill-eval /path/to/project <skill-name-or-path>
+
+# 模式 C：健檢測試 Harness
 node src/cli/test-sentinel.js run harness-eval /path/to/project
+
+# 查詢指定模式與目標的歷史紀錄
+node src/cli/test-sentinel.js history <mode> <target> /path/to/project
 ```
 
-### 3. 背景哨兵門禁 (Sentinel Gate)
+`run` 指令可加上 `--format=markdown`、`--format=junit` 或 `--format=json`，供 PR 留言、CI 測試報告或後續程式處理使用。例如：
+
 ```bash
-# 守候變更 (0 Token)，偵測到改動自動 exit 0 觸發外部 Agent
+node src/cli/test-sentinel.js run diff-e2e /path/to/project --format=junit > test-sentinel.xml
+```
+
+### 結果判讀
+
+- `MEASURED`：具備實際執行證據，可用於品質判定。
+- `HEURISTIC`：僅為靜態或關鍵詞推估，適合初步診斷，不適合作為阻擋合併的依據。
+- `INCONCLUSIVE`：本次沒有足夠證據產生分數。常見原因是找不到測試 script、基線測試失敗、沒有可用變異，或 Harness 沒有可注入的目標。
+- 模式 A 的 Kill Rate 越高，表示現有測試越能偵測邏輯被破壞；低於 80% 代表仍有變異在測試下存活。
+- 模式 B 應同時查看 Recall 與 Precision：前者代表該觸發時有觸發，後者代表不該觸發時能抑制。
+- 任何 `pageerror`、`console.error` 或 HTTP 5xx 都應優先處理，不應只看總分。
+
+### 常見問題
+
+**Web 找不到待測專案**
+可在左側「目標專案路徑」直接輸入或貼上任何本機目錄路徑（例如 `~/dev/my-app` 或 `/path/to/project`），或點擊資料夾圖示透過系統選取視窗選擇。
+
+**模式 A 顯示 `INCONCLUSIVE`**
+
+先在待測專案中手動執行對應的 `npm run test:e2e`、`npm run e2e` 或 `npm test`。基線必須通過，且目前 diff 中要有可安全套用的變異候選點。
+
+**模式 B 一直沒有 `MEASURED` 結果**
+
+確認 `agent:watch` 已在評測前啟動、Desktop Agent 已使用畫面提供的 Prompt，且所有 query 結果都已回寫。不要自行估算 runtime 未提供的 Token 數。
+
+**啟動背景變更門禁**
+
+以下指令會以零 Token 待命；偵測到目標專案變更後以 exit code 0 結束，供外部 Agent 或自動化流程接手：
+
+```bash
 node src/cli/watch-gate.js /path/to/project
 ```
 
@@ -113,5 +210,5 @@ test-sentinel/
 │   │       └── harness-auditor.js
 │   ├── web/                    # 現代暗黑風格 Web Dashboard
 │   └── cli/                    # CLI 與守候門禁
-└── tests/self-test.js          # 8 大模組整合自檢
+└── tests/self-test.js          # 9 大模組整合自檢
 ```

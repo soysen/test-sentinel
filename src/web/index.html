@@ -57,18 +57,32 @@
           <span>專案選擇與架構概覽</span>
         </div>
 
-        <!-- 專案選取器 -->
+        <!-- 專案路徑選取器 -->
         <div class="project-selector-wrapper mt-2">
-          <label for="projectSelect" class="input-label">目標專案：</label>
-          <div class="project-select-row">
-            <select id="projectSelect" class="styled-select">
-              <option value="">載入專案清單中...</option>
-            </select>
-            <button id="refreshBtn" class="btn btn-icon" title="重新整理專案">
-              <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
-              </svg>
-            </button>
+          <label for="projectPathInput" class="input-label">目標專案路徑：</label>
+          <div class="project-path-box">
+            <div class="project-input-row">
+              <input type="text" id="projectPathInput" class="styled-input project-path-input" placeholder="輸入或貼上專案路徑 (如 ~/my-app)..." autocomplete="off">
+              <button type="button" id="browseFolderBtn" class="btn btn-icon" title="從系統瀏覽選擇資料夾">
+                <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+              </button>
+            </div>
+            <div class="project-action-row mt-2">
+              <button type="button" id="btnLoadProject" class="btn btn-primary btn-sm flex-1" title="載入並分析此專案資訊">
+                <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="9 11 12 14 22 4"/>
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                </svg>
+                <span>載入專案資訊</span>
+              </button>
+              <button id="refreshBtn" class="btn btn-icon btn-sm" title="重新整理專案">
+                <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -153,6 +167,12 @@
                       <line x1="21" y1="21" x2="16.65" y2="16.65"/>
                     </svg>
                     <input type="text" id="skillSearchInput" class="autocomplete-input" placeholder="請選擇或搜尋 Skill..." autocomplete="off">
+                    <button type="button" id="clearSkillBtn" class="clear-skill-btn hidden" title="清除選取的 Skill">
+                      <svg class="clear-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
                     <button type="button" id="toggleDropdownBtn" class="dropdown-arrow-btn" title="切換選單">
                       <svg class="arrow-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="6 9 12 15 18 9"/>

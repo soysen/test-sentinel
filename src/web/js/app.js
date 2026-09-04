@@ -33,6 +33,10 @@ const workspaceView = document.getElementById('workspaceView');
 const historyView = document.getElementById('historyView');
 
 // 工作區專案與模式
+const projectPathInput = document.getElementById('projectPathInput');
+const browseFolderBtn = document.getElementById('browseFolderBtn');
+const btnLoadProject = document.getElementById('btnLoadProject');
+const projectSuggestions = document.getElementById('projectSuggestions');
 const projectSelect = document.getElementById('projectSelect');
 const refreshBtn = document.getElementById('refreshBtn');
 const projectInfo = document.getElementById('projectInfo');
@@ -44,6 +48,7 @@ const modeGenericHeader = document.getElementById('modeGenericHeader');
 const genericModeTag = document.getElementById('genericModeTag');
 const genericModeDesc = document.getElementById('genericModeDesc');
 const skillSearchInput = document.getElementById('skillSearchInput');
+const clearSkillBtn = document.getElementById('clearSkillBtn');
 const toggleDropdownBtn = document.getElementById('toggleDropdownBtn');
 const autocompleteDropdown = document.getElementById('autocompleteDropdown');
 const btnGenerateFlow = document.getElementById('btnGenerateFlow');
@@ -141,9 +146,31 @@ function bindEvents() {
     btnJumpToHistory.addEventListener('click', () => switchView('history'));
   }
 
-  // 工作區專案選取與重新整理
-  projectSelect.addEventListener('change', () => selectProject(projectSelect.value));
-  refreshBtn.addEventListener('click', () => selectProject(projectSelect.value));
+  // 工作區專案路徑選取、輸入與瀏覽
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      const p = (projectPathInput && projectPathInput.value.trim()) || state.currentProject;
+      if (p) selectProject(p);
+    });
+  }
+  if (btnLoadProject) {
+    btnLoadProject.addEventListener('click', () => {
+      const p = (projectPathInput && projectPathInput.value.trim()) || state.currentProject;
+      if (p) selectProject(p);
+    });
+  }
+  if (projectPathInput) {
+    projectPathInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const p = projectPathInput.value.trim();
+        if (p) selectProject(p);
+      }
+    });
+  }
+  if (browseFolderBtn) {
+    browseFolderBtn.addEventListener('click', browseFolder);
+  }
 
   // 獨立歷史中心：專案切換
   if (histProjectSelect) {
@@ -196,13 +223,25 @@ function bindEvents() {
     toggleConceptBtn.textContent = isHidden ? '[ + 展開 ]' : '[ - 收合 ]';
   });
 
-  // Skill 下拉選單
+  // Skill 下拉選單與清除按鈕
   skillSearchInput.addEventListener('focus', openSkillDropdown);
   skillSearchInput.addEventListener('input', () => {
+    updateSkillClearBtn();
+    if (!skillSearchInput.value.trim()) {
+      state.selectedSkill = null;
+    }
     openSkillDropdown();
     renderAutocompleteOptions(skillSearchInput.value);
   });
   skillSearchInput.addEventListener('keydown', handleDropdownKeynav);
+
+  if (clearSkillBtn) {
+    clearSkillBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearSkillSelection();
+      skillSearchInput.focus();
+    });
+  }
 
   toggleDropdownBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -440,7 +479,32 @@ function populateHistoryProjectOptions() {
   if (!histProjectSelect) return;
   const currentVal = histProjectSelect.value || state.history.project || state.currentProject;
   histProjectSelect.innerHTML = '';
-  state.projectsList.forEach(p => {
+
+  const seenPaths = new Set();
+  const allProjects = [];
+
+  if (state.currentProject) {
+    const projName = state.profile?.name || (state.currentProject.split(/[/\\]/).filter(Boolean).pop() || state.currentProject);
+    allProjects.push({ name: projName, path: state.currentProject });
+    seenPaths.add(state.currentProject);
+  }
+
+  const recent = getRecentProjects();
+  recent.forEach(r => {
+    if (!seenPaths.has(r.path)) {
+      seenPaths.add(r.path);
+      allProjects.push(r);
+    }
+  });
+
+  (state.projectsList || []).forEach(p => {
+    if (!seenPaths.has(p.path)) {
+      seenPaths.add(p.path);
+      allProjects.push(p);
+    }
+  });
+
+  allProjects.forEach(p => {
     const opt = document.createElement('option');
     opt.value = p.path;
     opt.textContent = p.name;
@@ -673,26 +737,79 @@ function renderFlowTrack(steps, completedUpTo = 0) {
   `).join('');
 }
 
-// 3. 專案清單與選取
+// 3. 專案清單、路徑管理與選取
+const RECENT_PROJECTS_KEY = 'test_sentinel_recent_projects';
+const LAST_PROJECT_KEY = 'test_sentinel_last_project';
+
+function getRecentProjects() {
+  try {
+    const raw = localStorage.getItem(RECENT_PROJECTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentProject(projPath, projName) {
+  if (!projPath) return;
+  try {
+    let recent = getRecentProjects().filter(p => p.path !== projPath);
+    recent.unshift({
+      name: projName || (projPath.split(/[/\\]/).filter(Boolean).pop() || projPath),
+      path: projPath
+    });
+    recent = recent.slice(0, 10);
+    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(recent));
+    localStorage.setItem(LAST_PROJECT_KEY, projPath);
+  } catch {}
+}
+
+async function browseFolder() {
+  if (!browseFolderBtn) return;
+  const originalHtml = browseFolderBtn.innerHTML;
+  browseFolderBtn.disabled = true;
+  try {
+    const res = await fetch('/api/projects/choose-dialog', { method: 'POST' });
+    const data = await res.json();
+    if (res.status === 404 || data.error?.includes('API endpoint not found')) {
+      alert('【需重啟服務】\n目前運行的 Test Sentinel 伺服器是在新增目錄選取功能前啟動的。\n請至終端按 Ctrl+C 結束，再重新執行 npm start 即會啟用資料夾選取功能。\n\n目前您可直接在「目標專案路徑」輸入框中輸入或貼上專案目錄路徑，點擊「載入專案資訊」即可！');
+      if (projectPathInput) projectPathInput.focus();
+      return;
+    }
+    if (data.path) {
+      if (projectPathInput) projectPathInput.value = data.path;
+      await selectProject(data.path);
+    } else if (data.canceled) {
+      // 使用者手動取消視窗
+    } else if (data.error) {
+      alert(`選取目錄失敗: ${data.error}。請直接在輸入框中貼上或輸入路徑。`);
+      if (projectPathInput) projectPathInput.focus();
+    }
+  } catch (e) {
+    alert(`無法開啟系統對話框: ${e.message}。請直接在輸入框中輸入路徑。`);
+    if (projectPathInput) projectPathInput.focus();
+  } finally {
+    browseFolderBtn.disabled = false;
+    browseFolderBtn.innerHTML = originalHtml;
+  }
+}
+
 async function loadProjects() {
   try {
     const res = await fetch('/api/projects/list');
     const list = await res.json();
-    state.projectsList = list;
-    projectSelect.innerHTML = '';
-
-    list.forEach(item => {
-      const opt = document.createElement('option');
-      opt.value = item.path;
-      opt.textContent = `${item.name}`;
-      projectSelect.appendChild(opt);
-    });
+    state.projectsList = Array.isArray(list) ? list : [];
 
     populateHistoryProjectOptions();
 
-    if (list.length > 0) {
-      const defaultProj = list.find(p => p.name === 'task-dashboard') || list[0];
-      projectSelect.value = defaultProj.path;
+    // 優先讀取上次使用的專案路徑，若無則使用清單中專案或當前目錄
+    const lastProject = localStorage.getItem(LAST_PROJECT_KEY);
+    const defaultProj = (lastProject && { path: lastProject })
+      || state.projectsList.find(p => p.name.includes('當前') || p.name === 'test-sentinel')
+      || state.projectsList[0];
+
+    if (defaultProj && defaultProj.path) {
+      if (projectPathInput) projectPathInput.value = defaultProj.path;
       await selectProject(defaultProj.path);
     }
   } catch (e) {
@@ -702,21 +819,37 @@ async function loadProjects() {
 
 async function selectProject(projPath) {
   if (!projPath) return;
-  state.currentProject = projPath;
+  const targetPath = projPath.trim();
+  if (!targetPath) return;
+
+  state.currentProject = targetPath;
+  if (projectPathInput) {
+    projectPathInput.value = targetPath;
+  }
   updateDesktopAgentPrompt();
-  state.selectedSkill = null; // 初始狀態無預設值
-  skillSearchInput.value = ''; // 清空輸入框
+  clearSkillSelection();
   projectInfo.innerHTML = '<p>掃描專案架構中...</p>';
 
   try {
     const res = await fetch('/api/projects/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectPath: projPath })
+      body: JSON.stringify({ projectPath: targetPath })
     });
     const profile = await res.json();
+    if (!res.ok || profile.error) {
+      throw new Error(profile.error || `HTTP ${res.status}`);
+    }
+
     state.profile = profile;
+    state.currentProject = profile.path || targetPath;
+    if (projectPathInput) {
+      projectPathInput.value = state.currentProject;
+    }
     state.skillsList = profile.skills || [];
+
+    saveRecentProject(state.currentProject, profile.name);
+    populateHistoryProjectOptions();
 
     renderProjectInfo(profile);
     renderAutocompleteOptions('');
@@ -740,6 +873,28 @@ function renderProjectInfo(p) {
       <div><strong>Harness 狀態：</strong> ${hasHarness}</div>
     </div>
   `;
+}
+
+function updateSkillClearBtn() {
+  if (!clearSkillBtn) return;
+  const hasVal = Boolean(state.selectedSkill || (skillSearchInput && skillSearchInput.value.trim().length > 0));
+  clearSkillBtn.classList.toggle('hidden', !hasVal);
+}
+
+function clearSkillSelection() {
+  state.selectedSkill = null;
+  if (skillSearchInput) {
+    skillSearchInput.value = '';
+  }
+  updateSkillClearBtn();
+
+  // 重設下層預覽
+  if (casesSection) casesSection.classList.add('hidden');
+  if (actionTriggerSection) actionTriggerSection.classList.add('hidden');
+  if (scorecardSection) scorecardSection.classList.add('hidden');
+
+  updateNavHistoryBadge();
+  renderAutocompleteOptions('');
 }
 
 // 4. Autocomplete 下拉選單邏輯
@@ -803,6 +958,7 @@ function renderAutocompleteOptions(filter = '') {
 function selectSingleSkill(skill) {
   state.selectedSkill = skill;
   skillSearchInput.value = skill.name;
+  updateSkillClearBtn();
 
   // 重設下層預覽
   casesSection.classList.add('hidden');
