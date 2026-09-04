@@ -18,7 +18,7 @@ const { QualityScorer } = require('../core/scorer');
 
 const args = process.argv.slice(2);
 const command = args[0] || 'help';
-const targetDir = args[1] ? path.resolve(args[1]) : process.cwd();
+const targetDir = (command === "run" ? args[2] : args[1]) ? path.resolve(command === "run" ? args[2] : args[1]) : process.cwd();
 
 console.log(`\n🛡️  [TEST SENTINEL CLI] Target: ${targetDir}\n`);
 
