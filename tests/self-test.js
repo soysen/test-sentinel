@@ -73,7 +73,7 @@ console.log('   ✅ Diff E2E Runner verified. Probe file:', probe.relativeFile);
 console.log('6. Testing SkillEvaluator (模式 B)...');
 const skillEvaluator = new SkillEvaluator(path.resolve(__dirname, '..'));
 const mockSkillPath = path.join(__dirname, 'mock-skill.md');
-fs.writeFileSync(mockSkillPath, '# Demo Skill\nDescription: A test skill');
+fs.writeFileSync(mockSkillPath, '---\nname: demo-skill\ndescription: Demo skill for automated testing\n---\n# Demo Skill\nUse when testing skills.');
 const skillReport = skillEvaluator.evaluateSkill(mockSkillPath);
 assert(skillReport.metrics.overallScore >= 90, 'Skill score should be >= 90');
 fs.unlinkSync(mockSkillPath);
@@ -82,7 +82,15 @@ console.log('   ✅ Skill Evaluator verified. Overall Score:', skillReport.metri
 // 7. Harness Auditor Test (模式 C)
 console.log('7. Testing HarnessAuditor (模式 C)...');
 const harnessAuditor = new HarnessAuditor(path.resolve(__dirname, '..'));
-const auditReport = harnessAuditor.auditHarness();
+// 建立一個有能力檢查 JSON 完整性的測試腳本
+const testScript = path.join(__dirname, "mock-harness.sh");
+fs.writeFileSync(testScript, "#!/bin/bash\nset -e\nnode -e \"JSON.parse(require('fs').readFileSync('data/tasks.json', 'utf8'))\"\n");
+fs.mkdirSync(path.join(__dirname, "../data"), { recursive: true });
+fs.writeFileSync(path.join(__dirname, "../data/tasks.json"), "[]");
+const auditReport = harnessAuditor.auditHarness("bash " + testScript);
+fs.unlinkSync(testScript);
+fs.unlinkSync(path.join(__dirname, "../data/tasks.json"));
+fs.rmdirSync(path.join(__dirname, "../data"));
 assert(auditReport.healthScore === 100, 'Harness health score should be 100');
 console.log('   ✅ Harness Auditor verified. Status:', auditReport.status);
 
