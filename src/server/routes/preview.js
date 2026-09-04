@@ -136,7 +136,8 @@ function getCasesPreview({ mode, projectPath, skillPath, harnessScript }) {
 
   if (mode === 'harness-eval') {
     const auditor = new HarnessAuditor(resolvedProject);
-    const detectedCmd = harnessScript || auditor.detectHarnessCommand() || 'npm test';
+    const detectedCmd = harnessScript || auditor.detectHarnessCommand();
+    const commandLabel = detectedCmd || '未找到 Harness 專用執行命令';
 
     const standards = [
       {
@@ -162,8 +163,8 @@ function getCasesPreview({ mode, projectPath, skillPath, harnessScript }) {
         name: '正常環境基線順行測試',
         type: '正向基線',
         objective: '確認專案目前的 Harness 流程在無干擾的乾淨狀態下能正常順利通過。',
-        input: `執行測試指令: ${detectedCmd}`,
-        expected: 'Exit Code = 0 (正常順行，無異常中斷)'
+        input: detectedCmd ? `執行測試指令: ${detectedCmd}` : commandLabel,
+        expected: detectedCmd ? 'Exit Code = 0 (正常順行，無異常中斷)' : '請先提供 Harness 專用執行命令'
       },
       {
         id: 'PLAN-HARNESS-02',
@@ -194,7 +195,8 @@ function getCasesPreview({ mode, projectPath, skillPath, harnessScript }) {
     return {
       mode: 'harness-eval',
       modeTitle: '模式 C: Harness 流程實體健檢與故障注入',
-      targetSummary: `目標測試指令: ${detectedCmd}`,
+      targetSummary: `目標測試指令: ${commandLabel}`,
+      commandAvailable: Boolean(detectedCmd),
       standards,
       plannedCases
     };

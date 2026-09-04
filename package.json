@@ -15,10 +15,14 @@
     "agent:watch": "node src/cli/agent-eval.js watch",
     "agent:next": "node src/cli/agent-eval.js next",
     "agent:complete": "node src/cli/agent-eval.js complete",
-    "test": "node tests/self-test.js"
+    "test": "npm run test:unit && npm run test:worker",
+    "test:unit": "node tests/self-test.js",
+    "test:worker": "node tests/worker-integration.js",
+    "test:e2e": "node tests/run-e2e.js"
   },
-  "dependencies": {},
-  "devDependencies": {},
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  },
   "keywords": [
     "testing",
     "e2e",

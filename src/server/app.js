@@ -12,7 +12,6 @@ const path = require('path');
 const url = require('url');
 const os = require('os');
 const { exec } = require('child_process');
-const { Worker } = require('worker_threads');
 
 const { ProjectScanner } = require('../core/scanner');
 const { GitNexusBridge } = require('../core/gitnexus');
@@ -24,6 +23,7 @@ const { SkillEvaluator } = require('../core/modes/skill-evaluator');
 const { QualityScorer } = require('../core/scorer');
 const { ProjectWatcher } = require('../core/watcher');
 const { AgentEvalQueue } = require('../core/agent-eval-queue');
+const { runEvaluationWorker } = require('./evaluation-runner');
 
 const PORT = process.env.PORT || 3890;
 const PROJECTS_BASE = path.join(process.env.HOME || '/Users/nelsonchung', 'projects');
@@ -47,37 +47,6 @@ function sendSse(event, data) {
   for (const res of sseClients) {
     res.write(message);
   }
-}
-
-function runEvaluationWorker(mode, projectPath, options, onProgress) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(path.join(__dirname, 'evaluation-worker.js'), {
-      workerData: { mode, projectPath, options }
-    });
-    let settled = false;
-
-    worker.on('message', message => {
-      if (message.type === 'progress') {
-        onProgress(message.progress);
-        return;
-      }
-      if (message.type === 'result') {
-        settled = true;
-        resolve(message.result);
-        return;
-      }
-      if (message.type === 'error') {
-        settled = true;
-        reject(new Error(message.error));
-      }
-    });
-    worker.on('error', error => {
-      if (!settled) reject(error);
-    });
-    worker.on('exit', code => {
-      if (!settled && code !== 0) reject(new Error(`Evaluation worker exited with code ${code}`));
-    });
-  });
 }
 
 const server = http.createServer((req, res) => {
@@ -472,6 +441,12 @@ const server = http.createServer((req, res) => {
   // 若以 /api/ 開頭但未被匹配，回傳 JSON 404，不得落入靜態檔案伺服器
   if (pathname.startsWith('/api/')) {
     return jsonResponse({ error: `API endpoint not found: ${pathname}` }, 404);
+  }
+
+  if (pathname === '/favicon.ico') {
+    res.writeHead(204);
+    res.end();
+    return;
   }
 
   // 靜態檔案服務 (Web Dashboard)

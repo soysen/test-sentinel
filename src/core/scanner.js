@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { detectHarnessCommand } = require('./harness-command');
 
 class ProjectScanner {
   constructor(projectPath) {
@@ -211,21 +212,13 @@ class ProjectScanner {
     const harnessDir = path.join(this.projectPath, 'harness');
     const githubHarnessDir = path.join(this.projectPath, '.github', 'harness');
     const ghWorkflows = path.join(this.projectPath, '.github', 'workflows');
-    const candidateScripts = [
-      '.github/harness/harness_check.sh',
-      '.github/harness/check.sh',
-      '.github/harness/test.sh',
-      'scripts/harness_check.sh',
-      'scripts/test.sh',
-      'run_tests.sh',
-      'test.sh'
-    ];
-    const packageScript = pkg?.scripts?.['harness:check'] ? 'npm run harness:check' : null;
-    const scriptPath = candidateScripts.find(candidate => fs.existsSync(path.join(this.projectPath, candidate))) || null;
-
-    const hasHarness = fs.existsSync(harnessMd)
+    const githubHarnessHasContent = this.directoryHasFiles(githubHarnessDir);
+    const harnessEvidence = fs.existsSync(harnessMd)
       || fs.existsSync(harnessDir)
-      || Boolean(packageScript || scriptPath);
+      || githubHarnessHasContent;
+    const harnessCommand = detectHarnessCommand(this.projectPath, { pkg });
+
+    const hasHarness = harnessEvidence || Boolean(harnessCommand);
     const workflows = [];
 
     if (fs.existsSync(ghWorkflows)) {
@@ -239,9 +232,21 @@ class ProjectScanner {
       hasHarness,
       harnessMdExists: fs.existsSync(harnessMd),
       githubHarnessExists: fs.existsSync(githubHarnessDir),
-      command: packageScript || (scriptPath ? `bash ${scriptPath}` : null),
+      command: harnessCommand,
       workflows
     };
+  }
+
+  directoryHasFiles(directoryPath) {
+    if (!fs.existsSync(directoryPath)) return false;
+    try {
+      return fs.readdirSync(directoryPath, { withFileTypes: true }).some(entry => {
+        const entryPath = path.join(directoryPath, entry.name);
+        return entry.isFile() || (entry.isDirectory() && this.directoryHasFiles(entryPath));
+      });
+    } catch (e) {
+      return false;
+    }
   }
 }
 

@@ -1299,6 +1299,7 @@ async function executeTestFlow() {
     let payload = {
       projectPath: state.currentProject,
       evaluationId,
+      targetUrl: window.location.origin,
       mutations: [
         { type: 'Invert condition', pattern: '===' },
         { type: 'Flip boolean', pattern: 'true' }
@@ -1363,15 +1364,30 @@ async function executeTestFlow() {
     }
     state.lastEvaluation = runResult;
 
-    // 將實測結果覆蓋至測案清單
-    state.currentCases = runResult.result?.caseComparisons || runResult.caseComparisons || [];
+    // 將實測結果覆蓋至測案清單；無量測證據時保留原規劃，避免誤顯示成尚未生成。
+    const evaluatedCases = runResult.result?.caseComparisons || runResult.caseComparisons || [];
+    const evaluationStatus = runResult.result?.status || runResult.status;
+    const evaluationReason = runResult.result?.reason || runResult.reason || '本次未取得足夠證據。';
+    if (evaluatedCases.length > 0) {
+      state.currentCases = evaluatedCases;
+    } else if (evaluationStatus === 'INCONCLUSIVE') {
+      state.currentCases = state.currentCases.map(testCase => ({
+        ...testCase,
+        status: 'INCONCLUSIVE',
+        actual: evaluationReason,
+        evidenceType: 'NOT_MEASURED'
+      }));
+    } else {
+      state.currentCases = [];
+    }
     resetCaseResultsView();
     casesCountBadge.textContent = `${state.currentCases.length} 個測案`;
 
-    // 更新流程管線為全數完成
-    flowStatusBadge.textContent = '實體檢定完成 (Verified)';
-    flowStatusBadge.className = 'badge badge-success';
-    renderFlowTrack(getModeFlow(), 4);
+    // 更新流程管線狀態
+    const isInconclusive = evaluationStatus === 'INCONCLUSIVE';
+    flowStatusBadge.textContent = isInconclusive ? '實體檢定未完成 (Inconclusive)' : '實體檢定完成 (Verified)';
+    flowStatusBadge.className = isInconclusive ? 'badge badge-warning' : 'badge badge-success';
+    renderFlowTrack(getModeFlow(), isInconclusive ? 3 : 4);
 
     // 重新渲染測案卡片 (帶上 PASS/FAIL 與 Token 狀態)
     renderCaseBlocks(state.currentCases);

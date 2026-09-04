@@ -69,7 +69,7 @@ Web 會等待回寫，收到完整結果後才產生 `MEASURED` 分數。詳細�
 - 模式 A 需要待測專案提供 `test:e2e`、`e2e` 或 `test` npm script。若測試使用 Playwright，依賴與瀏覽器也必須已在待測專案中備妥。
 - 模式 B 的完整實測需要 Desktop Agent 配合；若未回寫真實路由結果，只會得到 `HEURISTIC`，不能當作正式品質門禁。
 
-Test Sentinel 本身沒有外部依賴，下載後可直接啟動：
+Test Sentinel 核心 runtime 沒有外部依賴，下載後可直接啟動：
 
 ```bash
 cd /path/to/test-sentinel
@@ -77,6 +77,13 @@ npm start
 ```
 
 瀏覽器開啟 [http://localhost:3890](http://localhost:3890)。如需改用其他連接埠：
+
+開發驗證需先執行 `npm install`。`@playwright/test` 僅為 dev dependency；UI E2E 預設使用本機 Chrome：
+
+```bash
+npm test             # 9 模組自檢 + Worker Thread 整合測試
+npm run test:e2e     # Dashboard UI E2E + 最近生成的隔離探針
+```
 
 ```bash
 PORT=4000 npm start
@@ -192,8 +199,9 @@ node src/cli/watch-gate.js /path/to/project
 
 ```
 test-sentinel/
+├── playwright.config.js       # UI E2E 與隔離探針設定
 ├── src/
-│   ├── server/app.js           # 輕量 HTTP 伺服器 + SSE 推送
+│   ├── server/                 # 輕量 HTTP 伺服器、SSE 與 Worker 啟動器
 │   ├── core/
 │   │   ├── scanner.js          # 專案指紋與框架探測器
 │   │   ├── gitnexus.js         # GitNexus CLI 知識圖譜橋接
@@ -210,5 +218,5 @@ test-sentinel/
 │   │       └── harness-auditor.js
 │   ├── web/                    # 現代暗黑風格 Web Dashboard
 │   └── cli/                    # CLI 與守候門禁
-└── tests/self-test.js          # 9 大模組整合自檢
+└── tests/                      # 核心自檢、Worker 整合與 Dashboard E2E
 ```

@@ -4,8 +4,12 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
+const { detectHarnessCommand } = require('../harness-command');
+
+const COMMAND_TIMEOUT_MS = 120000;
 
 class HarnessAuditor {
   constructor(projectPath) {
@@ -13,31 +17,34 @@ class HarnessAuditor {
   }
 
   detectHarnessCommand() {
-    const pkgPath = path.join(this.projectPath, 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      try {
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-        if (pkg.scripts && pkg.scripts['harness:check']) return 'npm run harness:check';
-        if (pkg.scripts && pkg.scripts['test']) return 'npm test';
-      } catch (e) {}
-    }
+    return detectHarnessCommand(this.projectPath);
+  }
 
-    const candidateScripts = [
-      '.github/harness/harness_check.sh',
-      '.github/harness/check.sh',
-      '.github/harness/test.sh',
-      'scripts/harness_check.sh',
-      'scripts/test.sh',
-      'run_tests.sh',
-      'test.sh'
-    ];
-    for (const s of candidateScripts) {
-      if (fs.existsSync(path.join(this.projectPath, s))) {
-        return `bash ${s}`;
+  getExecutionEnvironment() {
+    const env = { ...process.env };
+    const packagePath = path.join(this.projectPath, 'package.json');
+    try {
+      const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+      const targetMajor = Number(String(pkg.engines?.node || '').match(/\d+/)?.[0]);
+      const runtimeMajor = Number(process.versions.node.split('.')[0]);
+      if (targetMajor > 0 && targetMajor < 17 && runtimeMajor >= 17) {
+        const nvmVersionsDir = path.join(process.env.NVM_DIR || path.join(os.homedir(), '.nvm'), 'versions', 'node');
+        const matchingVersion = fs.existsSync(nvmVersionsDir)
+          ? fs.readdirSync(nvmVersionsDir)
+            .filter(name => name.startsWith(`v${targetMajor}.`))
+            .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))[0]
+          : null;
+        const matchingBin = matchingVersion ? path.join(nvmVersionsDir, matchingVersion, 'bin') : null;
+        if (matchingBin && fs.existsSync(path.join(matchingBin, 'node'))) {
+          env.PATH = `${matchingBin}${path.delimiter}${env.PATH || ''}`;
+        } else {
+          const options = new Set(String(env.NODE_OPTIONS || '').split(/\s+/).filter(Boolean));
+          options.add('--openssl-legacy-provider');
+          env.NODE_OPTIONS = [...options].join(' ');
+        }
       }
-    }
-
-    return null;
+    } catch (error) {}
+    return env;
   }
 
   auditHarness(customCommand = null, options = {}) {
@@ -52,9 +59,22 @@ class HarnessAuditor {
       reportProgress({ phase: 'inconclusive', step: 1, percent: 100, message: '找不到 Harness 執行命令' });
       return {
         timestamp: new Date().toISOString(),
-        healthScore: 0,
-        status: 'FAILED',
-        error: '未能在目標專案中找到任何可執行的 Harness 測試指令 (如 npm run harness:check 或 bash scripts/harness_check.sh)'
+        harnessScript: null,
+        healthScore: null,
+        status: 'INCONCLUSIVE',
+        reason: '已偵測到 Harness 設定，但找不到 Harness 專用執行命令。',
+        standards: [],
+        workflow: [
+          { step: 1, name: 'Harness 指令探索', desc: '未找到 Harness 專用執行命令', status: 'failed' },
+          { step: 2, name: '正常基線實測', desc: '尚未執行', status: 'pending' },
+          { step: 3, name: '實體破壞注入攻擊', desc: '尚未執行', status: 'pending' },
+          { step: 4, name: '復原與環境隔離檢查', desc: '尚未執行', status: 'pending' }
+        ],
+        caseComparisons: [],
+        checks: [],
+        suggestions: [
+          '請在 package.json 新增 harness:check，或於 .github/script、.github/scripts、scripts 放置 Harness 腳本。'
+        ]
       };
     }
     reportProgress({
@@ -62,7 +82,7 @@ class HarnessAuditor {
       step: 1,
       percent: 10,
       message: `已選擇命令：${harnessCmd}`,
-      estimatedMaxMs: 75000
+      estimatedMaxMs: COMMAND_TIMEOUT_MS * 4
     });
 
     // 1. 執行實體檢驗
@@ -212,8 +232,9 @@ class HarnessAuditor {
       const output = execSync(cmd, {
         cwd: this.projectPath,
         encoding: 'utf8',
+        env: this.getExecutionEnvironment(),
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 20000
+        timeout: COMMAND_TIMEOUT_MS
       });
 
       return {
@@ -227,7 +248,10 @@ class HarnessAuditor {
         name: 'Baseline Execution (正常基線執行)',
         passed: false,
         exitCode: err.status || 1,
-        detail: '基線執行失敗：' + (err.stderr || err.stdout || err.message).slice(0, 300)
+        timedOut: err.code === 'ETIMEDOUT',
+        detail: err.code === 'ETIMEDOUT'
+          ? `基線執行超過 ${COMMAND_TIMEOUT_MS / 1000} 秒上限。`
+          : '基線執行失敗：' + (err.stderr || err.stdout || err.message).slice(0, 300)
       };
     }
   }
@@ -290,6 +314,7 @@ class HarnessAuditor {
     ];
 
     let targetFile = null;
+    let targetSource = null;
     if (explicitTarget) {
       const resolvedTarget = path.resolve(this.projectPath, explicitTarget);
       if (!resolvedTarget.startsWith(this.projectPath + path.sep) || !fs.existsSync(resolvedTarget) || !fs.statSync(resolvedTarget).isFile()) {
@@ -302,13 +327,20 @@ class HarnessAuditor {
         };
       }
       targetFile = resolvedTarget;
+      targetSource = 'explicit';
     } else {
       for (const candidateFile of candidateFiles) {
         const fullPath = path.join(this.projectPath, candidateFile);
         if (fs.existsSync(fullPath)) {
           targetFile = fullPath;
+          targetSource = 'known-candidate';
           break;
         }
+      }
+      if (!targetFile) {
+        const referencedTarget = this.findCommandReferencedTarget(cmd);
+        targetFile = referencedTarget?.filePath || null;
+        targetSource = referencedTarget?.source || null;
       }
     }
 
@@ -323,9 +355,15 @@ class HarnessAuditor {
     }
 
     let originalContent = null;
+    let displacedPath = null;
     try {
-      originalContent = fs.readFileSync(targetFile, 'utf8');
-      fs.writeFileSync(targetFile, '{"__CORRUPTED_BY_TEST_SENTINEL__": true, invalid syntax ...', 'utf8');
+      if (/\.env(?:\.|$)/i.test(targetFile)) {
+        displacedPath = `${targetFile}.test-sentinel-fault`;
+        fs.renameSync(targetFile, displacedPath);
+      } else {
+        originalContent = fs.readFileSync(targetFile, 'utf8');
+        fs.writeFileSync(targetFile, '{"__CORRUPTED_BY_TEST_SENTINEL__": true, invalid syntax ...', 'utf8');
+      }
 
       let faultCaught = false;
       let exitCodeCaught = 0;
@@ -334,8 +372,9 @@ class HarnessAuditor {
         execSync(cmd, {
           cwd: this.projectPath,
           encoding: 'utf8',
+          env: this.getExecutionEnvironment(),
           stdio: ['pipe', 'pipe', 'pipe'],
-          timeout: 15000
+          timeout: COMMAND_TIMEOUT_MS
         });
         faultCaught = false;
       } catch (e) {
@@ -348,15 +387,40 @@ class HarnessAuditor {
         passed: faultCaught,
         applicable: true,
         targetFile: path.relative(this.projectPath, targetFile),
+        targetSource,
         exitCodeCaught,
         detail: faultCaught
           ? `✅ 破壞注入成功被攔截 (Exit Code: ${exitCodeCaught})。Harness 具備阻斷能力。`
           : '❌ 嚴重漏洞：已注入破壞資料，但 Harness 依然回傳 0 假性通過！'
       };
     } finally {
-      if (originalContent !== null) {
+      if (displacedPath && fs.existsSync(displacedPath)) {
+        fs.renameSync(displacedPath, targetFile);
+      } else if (originalContent !== null) {
         fs.writeFileSync(targetFile, originalContent, 'utf8');
       }
+    }
+  }
+
+  findCommandReferencedTarget(cmd) {
+    const packageScriptMatch = cmd.match(/^npm run ([^\s]+)$/);
+    if (!packageScriptMatch) return null;
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(this.projectPath, 'package.json'), 'utf8'));
+      const script = pkg.scripts?.[packageScriptMatch[1]] || '';
+      const pathMatches = script.matchAll(/(?:^|\s)(?:-f\s+)?([^\s"']+\.(?:env|json|ya?ml))(?:\s|$)/gi);
+      for (const match of pathMatches) {
+        const filePath = path.resolve(this.projectPath, match[1]);
+        if (filePath.startsWith(this.projectPath + path.sep) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+          return { filePath, source: `package.json#scripts.${packageScriptMatch[1]}` };
+        }
+      }
+      return {
+        filePath: path.join(this.projectPath, 'package.json'),
+        source: `npm run ${packageScriptMatch[1]} manifest`
+      };
+    } catch (error) {
+      return null;
     }
   }
 
@@ -364,8 +428,9 @@ class HarnessAuditor {
     try {
       const beforeStatus = this.getWorktreeFingerprint();
 
-      execSync(cmd, { cwd: this.projectPath, stdio: ['ignore', 'ignore', 'ignore'], timeout: 20000 });
-      execSync(cmd, { cwd: this.projectPath, stdio: ['ignore', 'ignore', 'ignore'], timeout: 20000 });
+      const env = this.getExecutionEnvironment();
+      execSync(cmd, { cwd: this.projectPath, env, stdio: ['ignore', 'ignore', 'ignore'], timeout: COMMAND_TIMEOUT_MS });
+      execSync(cmd, { cwd: this.projectPath, env, stdio: ['ignore', 'ignore', 'ignore'], timeout: COMMAND_TIMEOUT_MS });
 
       const afterStatus = this.getWorktreeFingerprint();
       const isClean = beforeStatus === afterStatus;
