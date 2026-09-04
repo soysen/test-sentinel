@@ -27,7 +27,9 @@ const modePanels = {
 
 // Skill 選擇器
 const skillSearchInput = document.getElementById('skillSearchInput');
-const skillListContainer = document.getElementById('skillListContainer');
+const toggleDropdownBtn = document.getElementById('toggleDropdownBtn');
+const autocompleteDropdown = document.getElementById('autocompleteDropdown');
+const skillCountTag = document.getElementById('skillCountTag');
 const selectedSkillPreview = document.getElementById('selectedSkillPreview');
 
 // 兩階段工作流容器
@@ -73,9 +75,24 @@ function bindEvents() {
     });
   });
 
-  // Skill 搜尋過濾
+  // Skill Autocomplete 下拉選單互動
+  skillSearchInput.addEventListener('focus', () => openSkillDropdown());
   skillSearchInput.addEventListener('input', () => {
-    renderSkillList(state.skillsList, skillSearchInput.value);
+    openSkillDropdown();
+    renderAutocompleteOptions(skillSearchInput.value);
+  });
+  skillSearchInput.addEventListener('keydown', handleDropdownKeynav);
+
+  toggleDropdownBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleSkillDropdown();
+  });
+
+  // 點選外部關閉下拉選單
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.autocomplete-wrapper')) {
+      closeSkillDropdown();
+    }
   });
 
   // Step 1: 預覽測案按鈕
@@ -145,7 +162,7 @@ async function selectProject(projPath) {
     state.skillsList = profile.skills || [];
 
     renderProjectInfo(profile);
-    renderSkillList(state.skillsList, '');
+    renderAutocompleteOptions('');
 
     // 預設選取第一個 Skill (若有)
     if (state.skillsList.length > 0) {
@@ -183,43 +200,114 @@ function renderProjectInfo(p) {
   `;
 }
 
-// 5. Skill 搜尋與單檔選擇
-function renderSkillList(skills, filter) {
-  skillListContainer.innerHTML = '';
+// 5. Skill Autocomplete 下拉選單邏輯
+let activeOptionIdx = -1;
+
+function openSkillDropdown() {
+  autocompleteDropdown.classList.remove('hidden');
+  toggleDropdownBtn.classList.add('open');
+  renderAutocompleteOptions(skillSearchInput.value);
+}
+
+function closeSkillDropdown() {
+  autocompleteDropdown.classList.add('hidden');
+  toggleDropdownBtn.classList.remove('open');
+  activeOptionIdx = -1;
+}
+
+function toggleSkillDropdown() {
+  if (autocompleteDropdown.classList.contains('hidden')) {
+    openSkillDropdown();
+    skillSearchInput.focus();
+  } else {
+    closeSkillDropdown();
+  }
+}
+
+function renderAutocompleteOptions(filter = '') {
   const q = filter.toLowerCase().trim();
-  const filtered = skills.filter(s =>
+  const filtered = (state.skillsList || []).filter(s =>
     s.name.toLowerCase().includes(q) ||
     (s.source && s.source.toLowerCase().includes(q)) ||
     (s.relPath && s.relPath.toLowerCase().includes(q))
   );
 
+  if (skillCountTag) {
+    skillCountTag.textContent = `${state.skillsList?.length || 0} 個可用`;
+  }
+
   if (filtered.length === 0) {
-    skillListContainer.innerHTML = '<span style="font-size: 0.8rem; color: var(--text-muted);">無匹配的 Skill</span>';
+    autocompleteDropdown.innerHTML = '<div class="empty-option">無匹配的 Skill 檔案</div>';
     return;
   }
 
-  filtered.forEach(s => {
-    const chip = document.createElement('button');
-    chip.className = `skill-chip ${state.selectedSkill?.path === s.path ? 'selected' : ''}`;
-    chip.innerHTML = `<span class="source-tag">${s.source || 'root'}</span>${s.name}`;
-    chip.addEventListener('click', () => selectSingleSkill(s));
-    skillListContainer.appendChild(chip);
+  autocompleteDropdown.innerHTML = filtered.map((s, idx) => {
+    const isSelected = state.selectedSkill?.path === s.path;
+    return `
+      <div class="autocomplete-option ${isSelected ? 'selected' : ''}" data-idx="${idx}" data-path="${s.path}">
+        <div class="option-main">
+          <div><span class="source-tag">${s.source || 'root'}</span><strong>${s.name}</strong></div>
+          <div class="option-path">${s.relPath || s.path}</div>
+        </div>
+        ${isSelected ? '<span class="option-check">✓</span>' : ''}
+      </div>
+    `;
+  }).join('');
+
+  // 綁定選項點擊事件
+  autocompleteDropdown.querySelectorAll('.autocomplete-option').forEach((optEl, i) => {
+    optEl.addEventListener('click', () => {
+      selectSingleSkill(filtered[i]);
+      closeSkillDropdown();
+    });
+  });
+}
+
+function handleDropdownKeynav(e) {
+  const options = autocompleteDropdown.querySelectorAll('.autocomplete-option');
+  if (options.length === 0) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    activeOptionIdx = (activeOptionIdx + 1) % options.length;
+    updateActiveOption(options);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    activeOptionIdx = (activeOptionIdx - 1 + options.length) % options.length;
+    updateActiveOption(options);
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (activeOptionIdx >= 0 && activeOptionIdx < options.length) {
+      options[activeOptionIdx].click();
+    }
+  } else if (e.key === 'Escape') {
+    closeSkillDropdown();
+  }
+}
+
+function updateActiveOption(options) {
+  options.forEach((opt, idx) => {
+    opt.classList.toggle('option-active', idx === activeOptionIdx);
+    if (idx === activeOptionIdx) {
+      opt.scrollIntoView({ block: 'nearest' });
+    }
   });
 }
 
 function selectSingleSkill(skill) {
   state.selectedSkill = skill;
-  document.querySelectorAll('.skill-chip').forEach(c => {
-    c.classList.toggle('selected', c.textContent === skill.name);
-  });
+  skillSearchInput.value = skill.name;
 
   selectedSkillPreview.innerHTML = `
-    <div><strong>已選取 Skill：</strong> <span class="badge badge-accent">${skill.name}</span></div>
-    <div style="margin-top: 0.25rem;"><strong>路徑：</strong> <code>${skill.path}</code></div>
-    <div style="margin-top: 0.25rem; font-size: 0.75rem; color: #94a3b8;">點擊下方「🔍 1. 生成並預覽該 Skill 評測案」即可檢視即將執行的題庫與目的。</div>
+    <div class="flex-between">
+      <div><strong>已選取 Skill：</strong> <span class="source-tag">${skill.source || 'root'}</span><span class="badge badge-accent">${skill.name}</span></div>
+      <span class="badge badge-neutral">${skill.relPath}</span>
+    </div>
+    <div style="margin-top: 0.35rem; font-size: 0.75rem; color: #94a3b8;">
+      檔案路徑：<code>${skill.path}</code>
+    </div>
   `;
 
-  // 若目前已有預覽面板，提示需重新預覽
   if (!previewSection.classList.contains('hidden')) {
     previewSection.classList.add('hidden');
     resultsSection.classList.add('hidden');

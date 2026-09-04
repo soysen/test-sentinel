@@ -125,17 +125,24 @@
             <button id="btnGenSkillCases" class="btn btn-primary">🔍 1. 生成並預覽該 Skill 評測案</button>
           </div>
 
-          <!-- Skill 搜尋與選擇模組 -->
+          <!-- Skill Autocomplete 下拉選單模組 -->
           <div class="skill-picker-card mt-3">
             <div class="picker-header">
               <label><strong>🎯 選擇要測試的 Skill：</strong></label>
-              <input type="text" id="skillSearchInput" class="search-input" placeholder="🔍 搜尋 Skill 名稱 (e.g. gitnexus, commit)...">
+              <span id="skillCountTag" class="badge badge-accent">0 個可用</span>
             </div>
-            <div id="skillListContainer" class="skill-chips-grid mt-2">
-              <!-- 動態生成 Skill 按鈕 -->
+            <div class="autocomplete-wrapper mt-2">
+              <div class="autocomplete-input-box">
+                <span class="autocomplete-icon">🔍</span>
+                <input type="text" id="skillSearchInput" class="autocomplete-input" placeholder="點擊下拉或輸入搜尋 Skill (支援名稱、.github、.claude)..." autocomplete="off">
+                <button type="button" id="toggleDropdownBtn" class="dropdown-arrow-btn" title="切換下拉選單">▼</button>
+              </div>
+              <div id="autocompleteDropdown" class="autocomplete-dropdown hidden">
+                <!-- 動態選項 -->
+              </div>
             </div>
             <div id="selectedSkillPreview" class="selected-preview-box mt-3">
-              請從上方選取一個 Skill 檔案進行測試
+              請選取 Skill 進行測試
             </div>
           </div>
         </div>
