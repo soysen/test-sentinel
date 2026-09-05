@@ -141,6 +141,27 @@ const e2eRunner = new DiffE2ERunner(diffFixture);
 const inconclusiveResult = e2eRunner.runEvaluation({ mutations: [] });
 assert(inconclusiveResult.status === 'INCONCLUSIVE', 'Missing test command must be inconclusive');
 assert(inconclusiveResult.mutationResults.killRate === null, 'Unmeasured kill rate must be null');
+const bootstrapRunner = new DiffE2ERunner(diffFixture);
+bootstrapRunner.runProbe = probe => ({
+  status: 'MEASURED',
+  passed: true,
+  exitCode: 0,
+  marker: probe.executionMarker,
+  command: 'playwright bootstrap probe',
+  reason: null
+});
+const bootstrapResult = bootstrapRunner.runEvaluation({
+  mutations: [{
+    type: 'Flip exported boolean',
+    filePath: 'subject.js',
+    originalLine: 'module.exports = true;',
+    mutatedLine: 'module.exports = false;'
+  }]
+});
+assert.strictEqual(bootstrapResult.reasonCode, 'NO_EXISTING_BASELINE', 'Testless projects should report a missing baseline without treating it as a failed baseline');
+assert.strictEqual(bootstrapResult.baselinePassed, null, 'Testless projects must not fabricate a passing baseline');
+assert.strictEqual(bootstrapResult.probeExecution.status, 'MEASURED', 'Bootstrap probe should preserve measured runtime evidence');
+assert.deepStrictEqual(bootstrapResult.silentErrorsCaught, [], 'Successful bootstrap probe should report a clean runtime safety result');
 const originalSubject = fs.readFileSync(path.join(diffFixture, 'subject.js'), 'utf8');
 const diffProgress = [];
 const evalResult = e2eRunner.runEvaluation({

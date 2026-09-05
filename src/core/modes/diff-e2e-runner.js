@@ -22,6 +22,7 @@ class DiffE2ERunner {
   generateProbeSpec(options = {}) {
     const timestamp = Date.now();
     const probeFile = path.join(this.probeDir, `probe_${timestamp}.spec.js`);
+    const configFile = path.join(this.probeDir, `bootstrap_${timestamp}.config.cjs`);
     const executionMarker = `[TEST_SENTINEL_PROBE_EXECUTED:${timestamp}]`;
     const targetUrl = options.targetUrl || 'http://localhost:3000';
     const mockSnippet = options.mockSnippet || '';
@@ -66,7 +67,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
 
   test('Auto-generated behavior & silent crash probe', async ({ page }) => {
     console.log('${executionMarker}');
-    await page.goto('${targetUrl}');
+    await page.goto(${JSON.stringify(targetUrl)});
 
     ${interactions.join('\n    ')}
 
@@ -78,11 +79,20 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
 `;
 
     fs.writeFileSync(probeFile, code.trim(), 'utf8');
+    fs.writeFileSync(configFile, `module.exports = {
+  testDir: __dirname,
+  timeout: ${Number(options.timeoutMs) || 20000},
+  workers: 1,
+  reporter: 'line',
+  use: { channel: 'chrome' }
+};\n`, 'utf8');
     return {
       probeFile,
+      configFile,
       timestamp,
       executionMarker,
-      relativeFile: path.relative(this.projectPath, probeFile)
+      relativeFile: path.relative(this.projectPath, probeFile),
+      relativeConfigFile: path.relative(this.projectPath, configFile)
     };
   }
 
@@ -106,15 +116,25 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       message: '隔離探針已建立',
       estimatedMaxMs
     });
+    reportProgress({ phase: 'runtime', step: 3, percent: 15, message: `正在執行 Runtime 探針：${options.targetUrl || 'http://localhost:3000'}` });
+    const probeExecution = this.runProbe(probe, commandTimeoutMs);
 
     if (!testCommand) {
-      reportProgress({ phase: 'inconclusive', step: 2, percent: 100, message: '找不到可執行的測試命令' });
+      const runtimeMeasured = probeExecution.status === 'MEASURED';
+      reportProgress({
+        phase: runtimeMeasured ? 'runtime-complete' : 'inconclusive',
+        step: 3,
+        percent: 100,
+        message: runtimeMeasured ? 'Bootstrap Runtime 探針通過；無既有測試基線' : 'Bootstrap Runtime 探針執行失敗'
+      });
       return this.buildInconclusiveResult(
         probe,
         mutations,
-        '找不到可執行的測試命令，無法執行基線與變異測試。',
+        runtimeMeasured
+          ? '找不到既有測試命令；Bootstrap Runtime 探針已通過，但無法量測變異擊殺率。'
+          : '找不到既有測試命令，且 Bootstrap Runtime 探針未成功，無法取得有效評測證據。',
         null,
-        { reasonCode: 'NO_TEST_COMMAND', testStrategy }
+        { reasonCode: 'NO_EXISTING_BASELINE', testStrategy, probeExecution }
       );
     }
 
@@ -134,7 +154,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
         mutations,
         '基線測試未通過，變異結果不具判定效力。',
         baseline,
-        { reasonCode, testStrategy }
+        { reasonCode, testStrategy, probeExecution }
       );
     }
     reportProgress({ phase: 'baseline-complete', step: 3, percent: 30, message: '基線測試通過' });
@@ -145,7 +165,8 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
         probe,
         mutations,
         '未找到可執行的變異候選點。',
-        baseline
+        baseline,
+        { testStrategy, probeExecution }
       );
     }
 
@@ -178,7 +199,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       ? Math.round((killedCount / validCases.length) * 100)
       : null;
     const evaluationStatus = validCases.length > 0 ? 'MEASURED' : 'INCONCLUSIVE';
-    const hasRuntimeEvidence = baseline.probeExecuted;
+    const hasRuntimeEvidence = probeExecution.status === 'MEASURED';
     reportProgress({ phase: 'complete', step: 4, percent: 100, message: `評測完成，Kill Rate ${killRate ?? 'N/A'}%` });
 
     // 1. 定義測試標準
@@ -236,11 +257,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       baselinePassed: baseline.passed,
       baselineEvidence: baseline,
       testStrategy,
-      probeExecution: {
-        status: hasRuntimeEvidence ? 'MEASURED' : 'NOT_MEASURED',
-        marker: probe.executionMarker,
-        reason: hasRuntimeEvidence ? null : '測試輸出中未發現探針執行標記，不能宣稱已量測瀏覽器 runtime safety。'
-      },
+      probeExecution,
       standards,
       workflow,
       caseComparisons,
@@ -355,14 +372,57 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
     };
   }
 
-  runTestCommand(command, timeoutMs = 20000) {
+  runProbe(probe, timeoutMs = 20000) {
+    let playwrightCli;
+    let playwrightNodeModules;
+    try {
+      playwrightCli = require.resolve('@playwright/test/cli');
+      const packagePath = require.resolve('@playwright/test/package.json');
+      playwrightNodeModules = path.resolve(path.dirname(packagePath), '..', '..');
+    } catch (error) {
+      return {
+        status: 'NOT_MEASURED',
+        passed: false,
+        exitCode: null,
+        command: null,
+        marker: probe.executionMarker,
+        reason: `Playwright runner unavailable: ${error.message}`
+      };
+    }
+
+    const command = [
+      this.quoteShellArg(process.execPath),
+      this.quoteShellArg(playwrightCli),
+      'test',
+      this.quoteShellArg(probe.relativeFile),
+      `--config=${this.quoteShellArg(probe.relativeConfigFile)}`
+    ].join(' ');
+    const nodePath = [playwrightNodeModules, process.env.NODE_PATH].filter(Boolean).join(path.delimiter);
+    const execution = this.runTestCommand(command, timeoutMs, {
+      env: { ...process.env, NODE_PATH: nodePath }
+    });
+    const markerFound = `${execution.stdout}\n${execution.stderr}`.includes(probe.executionMarker);
+
+    return {
+      ...execution,
+      command,
+      marker: probe.executionMarker,
+      status: execution.passed && markerFound ? 'MEASURED' : 'NOT_MEASURED',
+      reason: execution.passed && markerFound
+        ? null
+        : (markerFound ? 'Runtime 探針已執行但未通過。' : 'Runtime 探針未產生執行標記。')
+    };
+  }
+
+  runTestCommand(command, timeoutMs = 20000, executionOptions = {}) {
     const startedAt = Date.now();
     try {
       const stdout = execSync(command, {
         cwd: this.projectPath,
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: timeoutMs
+        timeout: timeoutMs,
+        env: executionOptions.env || process.env
       });
       return { passed: true, exitCode: 0, durationMs: Date.now() - startedAt, stdout: stdout.slice(-2000), stderr: '' };
     } catch (error) {
@@ -442,6 +502,12 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
   }
 
   buildInconclusiveResult(probe, mutations, reason, baselineEvidence = null, metadata = {}) {
+    const probeExecution = metadata.probeExecution || {
+      status: 'NOT_MEASURED',
+      marker: probe.executionMarker,
+      reason: 'Runtime 探針未執行。'
+    };
+    const hasRuntimeEvidence = probeExecution.status === 'MEASURED';
     return {
       timestamp: new Date().toISOString(),
       probeFile: probe.relativeFile,
@@ -451,11 +517,12 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       baselinePassed: baselineEvidence ? baselineEvidence.passed : null,
       baselineEvidence,
       testStrategy: metadata.testStrategy || null,
+      probeExecution,
       standards: [],
       workflow: [],
       caseComparisons: [],
-      silentErrorsCaught: null,
-      networkFailuresCaught: null,
+      silentErrorsCaught: hasRuntimeEvidence ? [] : null,
+      networkFailuresCaught: hasRuntimeEvidence ? [] : null,
       mutationResults: {
         totalMutations: mutations.length,
         validMutations: 0,

@@ -296,10 +296,12 @@ test('E2E (模式 A) 路徑範圍選測：專案檔案預設、Tab 切換、檔�
   });
 
   // 9. 執行測案並確認 run 與 preview 一致
+  await page.locator('#targetUrlInput').fill('http://127.0.0.1:4173/app');
   await page.locator('#btnExecutePlan').click();
   await expect(page.locator('#flowStatusBadge')).toHaveText('實體檢定完成 (Verified)');
   expect(lastRunPayload.sourceMode).toBe('project');
   expect(lastRunPayload.pathScope).toEqual(lastPreviewPayload.pathScope);
+  expect(lastRunPayload.targetUrl).toBe('http://127.0.0.1:4173/app');
 
   // 10. 切換至「Git Diff」自動清除自訂範圍並載入 diff 檔案
   await page.locator('#btnScopeModeDiff').click();
@@ -359,9 +361,13 @@ test('4 欄獨立上下捲動工作區、管線流程直式排列、02 欄位置
   await page.route('**/api/cases/preview', route => route.fulfill({
     json: {
       modeTitle: '專案檔案 E2E',
-      plannedCases: [
-        { id: 'PLAN-01', name: '變異測試 1', type: '健全性', input: 'a.js:1', objective: '測試變異' }
-      ]
+      plannedCases: Array.from({ length: 20 }, (_, index) => ({
+        id: `PLAN-${String(index + 1).padStart(2, '0')}`,
+        name: `變異測試 ${index + 1}`,
+        type: '健全性',
+        input: `a.js:${index + 1}`,
+        objective: '測試變異'
+      }))
     }
   }));
 
@@ -416,6 +422,13 @@ test('4 欄獨立上下捲動工作區、管線流程直式排列、02 欄位置
   // 3. 驗證選擇專案或 DIFF 的 switch tab 具備充足寬度，且文字不換行
   const segmentedControl = page.locator('#diffSegmentedControl');
   await expect(segmentedControl).toBeVisible();
+  const targetUrlControl = page.locator('.runtime-target-control');
+  const scopeActionBar = page.locator('.diff-scope-action-bar');
+  await expect(targetUrlControl).toBeVisible();
+  const targetUrlBox = await targetUrlControl.boundingBox();
+  const scopeActionBox = await scopeActionBar.boundingBox();
+  expect(targetUrlBox.y + targetUrlBox.height).toBeLessThanOrEqual(scopeActionBox.y);
+  expect(await page.locator('#targetUrlInput').evaluate(el => window.getComputedStyle(el).fontFamily)).toContain('monospace');
 
   const projectBtn = page.locator('#btnScopeModeProject');
   const diffBtn = page.locator('#btnScopeModeDiff');
@@ -453,10 +466,18 @@ test('4 欄獨立上下捲動工作區、管線流程直式排列、02 欄位置
   await expect(col03Footer.locator('#btnExecutePlan')).toBeVisible();
   const casesPadding = await page.locator('#casesSection').evaluate(el => window.getComputedStyle(el).padding);
   expect(casesPadding).toBe('0px');
-  await expect(page.locator('#caseMasterList .case-item-card')).toHaveCount(1);
+  const caseCards = page.locator('#caseMasterList .case-item-card');
+  await expect(caseCards).toHaveCount(20);
   await expect(page.locator('#btnExecutePlan')).toBeEnabled();
-  expect(await col03Footer.evaluate(el => window.getComputedStyle(el).position)).toBe('sticky');
-  expect(await col03Footer.evaluate(el => window.getComputedStyle(el).bottom)).toBe('0px');
+  expect(await col03Footer.evaluate(el => window.getComputedStyle(el).position)).toBe('static');
+  const casesHeight = await page.locator('#casesSection').evaluate(el => ({
+    clientHeight: el.clientHeight,
+    scrollHeight: el.scrollHeight
+  }));
+  expect(casesHeight.clientHeight).toBeGreaterThanOrEqual(casesHeight.scrollHeight);
+  const lastCaseBox = await caseCards.last().boundingBox();
+  const footerBox = await col03Footer.boundingBox();
+  expect(footerBox.y).toBeGreaterThanOrEqual(lastCaseBox.y + lastCaseBox.height - 2);
 
   // 6. 點選測案項目，於項目右側彈出浮動視窗 (#caseInspectorPopover) 顯示細節
   await expect(page.locator('#caseInspectorPopover')).toBeHidden();
@@ -465,6 +486,10 @@ test('4 欄獨立上下捲動工作區、管線流程直式排列、02 欄位置
   await expect(page.locator('#inspectorCaseTitle')).toContainText('PLAN-01');
   const inspectorPosition = await page.locator('#caseInspectorPopover').evaluate(el => window.getComputedStyle(el).position);
   expect(inspectorPosition).toBe('fixed');
+  await expect(page.locator('#caseInspectorPopover')).not.toContainText('個別測案 Token 消耗明細');
+  const qualityHeadingBox = await page.locator('#inspectQualityBox .quality-score-heading').boundingBox();
+  const qualityPillBox = await page.locator('#inspectQualityBox .score-pill').boundingBox();
+  expect(qualityPillBox.y).toBeGreaterThanOrEqual(qualityHeadingBox.y + qualityHeadingBox.height);
 
   // 7. 點選關閉按鈕可收合浮動視窗
   await page.locator('#btnCloseInspectorPopover').click();

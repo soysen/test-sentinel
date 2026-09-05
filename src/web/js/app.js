@@ -55,6 +55,7 @@ const historyView = document.getElementById('historyView');
 
 // 工作區專案與模式
 const projectPathInput = document.getElementById('projectPathInput');
+const targetUrlInput = document.getElementById('targetUrlInput');
 const browseFolderBtn = document.getElementById('browseFolderBtn');
 const btnLoadProject = document.getElementById('btnLoadProject');
 const projectSuggestions = document.getElementById('projectSuggestions');
@@ -168,7 +169,6 @@ const inspectInput = document.getElementById('inspectInput');
 const caseCustomBadge = document.getElementById('caseCustomBadge');
 const btnResetInput = document.getElementById('btnResetInput');
 const inspectConfidenceBox = document.getElementById('inspectConfidenceBox');
-const inspectTokenTable = document.getElementById('inspectTokenTable');
 const inspectOutput = document.getElementById('inspectOutput');
 const inspectQualityBox = document.getElementById('inspectQualityBox');
 
@@ -2054,7 +2054,7 @@ async function executeTestFlow() {
     let payload = {
       projectPath: state.currentProject,
       evaluationId,
-      targetUrl: window.location.origin,
+      targetUrl: targetUrlInput?.value.trim() || 'http://localhost:3000',
       pathScope: pathScope || null,
       sourceMode: state.diffPathScope.sourceMode,
       mutations: [
@@ -2261,44 +2261,6 @@ function inspectCaseDetail(c, targetEl = null, openPopover = true) {
     `;
   }
 
-  // 個別測案 Token 消耗明細
-  if (inspectTokenTable) {
-    const token = c.tokenBreakdown;
-    const tokenMeasurement = c.tokenMeasurement || { status: 'UNAVAILABLE', reason: 'Agent runtime 未提供 Token 使用量。', latencyMs: null };
-    inspectTokenTable.innerHTML = token ? `
-      <div class="token-stat-row">
-        <span>輸入 Prompt Tokens (含 Context):</span>
-        <code>${token.promptTokens} tokens</code>
-      </div>
-      <div class="token-stat-row">
-        <span>輸出 Completion Tokens:</span>
-        <code>${token.completionTokens} tokens</code>
-      </div>
-      <div class="token-stat-row">
-        <span>執行延遲 (Latency):</span>
-        <code>${token.latencyMs} ms</code>
-      </div>
-      <div class="token-stat-row">
-        <span>本測案消耗總計:</span>
-        <strong>${token.totalTokens} tokens</strong>
-      </div>
-      ${token.efficiencyNote ? `<div style="margin-top: 0.35rem; font-size: 0.72rem; color: var(--accent-cyan);">${token.efficiencyNote}</div>` : ''}
-    ` : `
-      <div class="token-stat-row">
-        <span>Token 計量狀態：</span>
-        <code>${tokenMeasurement.status}</code>
-      </div>
-      <div class="token-stat-row">
-        <span>原因：</span>
-        <strong>${tokenMeasurement.reason}</strong>
-      </div>
-      <div class="token-stat-row">
-        <span>執行延遲：</span>
-        <code>${Number.isFinite(tokenMeasurement.latencyMs) ? tokenMeasurement.latencyMs + ' ms' : 'N/A'}</code>
-      </div>
-    `;
-  }
-
   // 產出結果預覽
   if (inspectOutput) {
     inspectOutput.textContent = c.simulatedOutput || c.actual || '尚未執行';
@@ -2308,9 +2270,12 @@ function inspectCaseDetail(c, targetEl = null, openPopover = true) {
   if (inspectQualityBox) {
     const quality = c.qualityEvaluation || { score: 'N/A', rating: 'NOT_EVALUATED', summary: '未取得可驗證的 Agent 產出證據。' };
     inspectQualityBox.innerHTML = `
-      <div class="flex-between">
-        <div><strong>產出品質評分：</strong> <span class="score-pill">${quality.score} / 100 [${quality.rating}]</span></div>
-        <span class="badge ${quality.score === 'N/A' ? 'badge-neutral' : 'badge-success'}">${quality.formatCompliance || quality.rating}</span>
+      <div class="quality-score-header">
+        <strong class="quality-score-heading">產出品質評分：</strong>
+        <div class="quality-score-meta">
+          <span class="score-pill">${quality.score} / 100 [${quality.rating}]</span>
+          <span class="badge ${quality.score === 'N/A' ? 'badge-neutral' : 'badge-success'}">${quality.formatCompliance || quality.rating}</span>
+        </div>
       </div>
       <div style="margin-top: 0.4rem; font-size: 0.75rem; color: #cbd5e1;">
         ${quality.summary}

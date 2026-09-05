@@ -214,6 +214,13 @@
 
           <!-- 選擇檔案按鈕與摘要列 -->
           <div id="diffScopeControlGroup" class="diff-scope-control-group mt-2">
+            <div class="runtime-target-control">
+              <label for="targetUrlInput" class="control-label">Runtime 目標網址</label>
+              <div class="runtime-target-input-box">
+                <span class="runtime-target-prompt" aria-hidden="true">$</span>
+                <input type="url" id="targetUrlInput" class="runtime-target-input" value="http://localhost:3000" placeholder="http://localhost:3000" autocomplete="url">
+              </div>
+            </div>
             <div class="diff-scope-action-bar">
               <button type="button" class="btn btn-sm btn-outline btn-scope-custom" id="btnScopeModeCustom" data-scope-mode="custom">
                 <svg class="btn-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -461,11 +468,6 @@
             <div class="detail-group mt-2">
               <label>信心指數解析 (Confidence Breakdown)：</label>
               <div id="inspectConfidenceBox" class="meta-callout"></div>
-            </div>
-
-            <div class="detail-group mt-2">
-              <label>個別測案 Token 消耗明細：</label>
-              <div id="inspectTokenTable" class="token-breakdown-box"></div>
             </div>
           </div>
 
