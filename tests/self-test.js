@@ -46,6 +46,8 @@ assert(mutationAnalyzer.findMutationCandidates(['if (enabled === true) run();'],
 assert(mutationAnalyzer.findMutationCandidates(['const markup = "<div>";'], 'src/web/app.js').length === 0, 'Operators inside strings must not become mutations');
 assert(mutationAnalyzer.findMutationCandidates(['const handler = () => true;'], 'src/web/app.js').length === 1, 'Arrow syntax must not become a comparison mutation');
 assert(mutationAnalyzer.findMutationCandidates(['return <div className="panel">Ready</div>;'], 'src/web/App.jsx').length === 0, 'JSX tag delimiters must not become comparison mutations');
+assert(mutationAnalyzer.findMutationCandidates(['return <div className="panel">Ready</div>;'], 'src/web/App.js').length === 0, 'Legacy .js React files must not treat JSX tag delimiters as comparisons');
+assert(mutationAnalyzer.findMutationCandidates(['return <Panel', '  enabled={ready === true}', '/>;'], 'src/web/App.js').length === 0, 'Multiline JSX tags in .js files must be masked across lines');
 assert(mutationAnalyzer.findMutationCandidates(['if (ready === true) return <Panel />;'], 'src/web/App.tsx').length === 2, 'TSX logic outside JSX tags should remain mutable');
 const logicalCandidates = mutationAnalyzer.findMutationCandidates(['if (count >= 1 && enabled === true) return;'], 'src/web/app.js');
 assert(logicalCandidates.length === 4, 'Executable comparisons, logical operators, and booleans should remain mutation candidates');
@@ -150,6 +152,7 @@ bootstrapRunner.runProbe = probe => ({
   command: 'playwright bootstrap probe',
   reason: null
 });
+bootstrapRunner.runTestCommand = () => ({ passed: true, exitCode: 0, durationMs: 1, stdout: '', stderr: '' });
 const bootstrapResult = bootstrapRunner.runEvaluation({
   mutations: [{
     type: 'Flip exported boolean',
@@ -158,10 +161,15 @@ const bootstrapResult = bootstrapRunner.runEvaluation({
     mutatedLine: 'module.exports = false;'
   }]
 });
-assert.strictEqual(bootstrapResult.reasonCode, 'NO_EXISTING_BASELINE', 'Testless projects should report a missing baseline without treating it as a failed baseline');
-assert.strictEqual(bootstrapResult.baselinePassed, null, 'Testless projects must not fabricate a passing baseline');
+assert.strictEqual(bootstrapResult.status, 'MEASURED', 'Testless projects should use a successful bootstrap probe as the mutation baseline');
+assert.strictEqual(bootstrapResult.testStrategy.type, 'BOOTSTRAP_PROBE', 'Testless projects should report the bootstrap strategy');
+assert.strictEqual(bootstrapResult.baselinePassed, true, 'Successful bootstrap probe should provide the measured baseline');
 assert.strictEqual(bootstrapResult.probeExecution.status, 'MEASURED', 'Bootstrap probe should preserve measured runtime evidence');
 assert.deepStrictEqual(bootstrapResult.silentErrorsCaught, [], 'Successful bootstrap probe should report a clean runtime safety result');
+const sampledMutations = bootstrapRunner.selectMutationSample(Array.from({ length: 305 }, (_, index) => ({ index })), 20);
+assert.strictEqual(sampledMutations.length, 20, 'Large single-file mutation sets should be capped to the execution budget');
+assert.strictEqual(sampledMutations[0].index, 0, 'Mutation sampling should include the start of the file');
+assert.strictEqual(sampledMutations.at(-1).index, 304, 'Mutation sampling should include the end of the file');
 const originalSubject = fs.readFileSync(path.join(diffFixture, 'subject.js'), 'utf8');
 const diffProgress = [];
 const evalResult = e2eRunner.runEvaluation({
@@ -381,6 +389,12 @@ assert(!mutableFilePaths.includes('tests/a.spec.js'), 'tests/a.spec.js should no
 const allProjectMutations = projectAnalyzer.getProjectMutations();
 assert(allProjectMutations.mutations.length > 0, 'Should extract mutations from project files');
 assert(allProjectMutations.mutations.every(m => typeof m.lineNumber === 'number' && m.lineNumber > 0), 'Every project mutation must have a positive 1-based lineNumber');
+
+const legacyJsxPath = path.join(gitFixture, 'src', 'core', 'legacy-page.js');
+fs.writeFileSync(legacyJsxPath, `${Array.from({ length: 1100 }, () => 'const view = <Panel />;').join('\n')}\nif (enabled === true) run();\n`);
+const legacyJsxMutations = projectAnalyzer.getProjectMutations({ selectedPaths: ['src/core/legacy-page.js'] });
+assert.strictEqual(legacyJsxMutations.files.length, 1, 'Large legacy JSX scope should remain limited to the selected file');
+assert.strictEqual(legacyJsxMutations.mutations.length, 2, 'JSX delimiters in .js files must not count toward the mutation limit');
 
 // 測試預覽模式 (sourceMode: 'project')
 const projectPreview = getCasesPreview({

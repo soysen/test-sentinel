@@ -214,6 +214,7 @@ test('E2E (模式 A) 路徑範圍選測：專案檔案預設、Tab 切換、檔�
   await page.setViewportSize({ width: 375, height: 667 });
   const summaryOverflow = await page.locator('#diffScopeSummaryBar').evaluate(el => el.scrollWidth <= el.clientWidth + 1);
   expect(summaryOverflow).toBe(true);
+  expect(await page.evaluate(() => document.body.scrollWidth <= window.innerWidth)).toBe(true);
   await page.setViewportSize({ width: 1280, height: 800 });
 
   // 3. 點選「選擇檔案」開啟 Modal
@@ -374,6 +375,13 @@ test('4 欄獨立上下捲動工作區、管線流程直式排列、02 欄位置
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
 
+  const horizontalOverflow = await page.evaluate(() => ({
+    bodyScrollable: document.body.scrollWidth > window.innerWidth,
+    workspaceScrollable: document.querySelector('#workspaceView').scrollWidth > document.querySelector('#workspaceView').clientWidth
+  }));
+  expect(horizontalOverflow.bodyScrollable).toBe(true);
+  expect(horizontalOverflow.workspaceScrollable).toBe(false);
+
   // 1. 驗證 4 欄獨立工作區架構存在且由左至右橫向排列
   const col01 = page.locator('#col01Project');
   const col02 = page.locator('#col02Generator');
@@ -475,9 +483,12 @@ test('4 欄獨立上下捲動工作區、管線流程直式排列、02 欄位置
     scrollHeight: el.scrollHeight
   }));
   expect(casesHeight.clientHeight).toBeGreaterThanOrEqual(casesHeight.scrollHeight);
-  const lastCaseBox = await caseCards.last().boundingBox();
-  const footerBox = await col03Footer.boundingBox();
-  expect(footerBox.y).toBeGreaterThanOrEqual(lastCaseBox.y + lastCaseBox.height - 2);
+  const caseFooterLayout = await page.locator('#col03Cases').evaluate(column => {
+    const lastCaseBox = column.querySelector('.case-item-card:last-child').getBoundingClientRect();
+    const footerBox = column.querySelector('#actionTriggerSection').getBoundingClientRect();
+    return { lastCaseBottom: lastCaseBox.bottom, footerTop: footerBox.top };
+  });
+  expect(caseFooterLayout.footerTop).toBeGreaterThanOrEqual(caseFooterLayout.lastCaseBottom - 2);
 
   // 6. 點選測案項目，於項目右側彈出浮動視窗 (#caseInspectorPopover) 顯示細節
   await expect(page.locator('#caseInspectorPopover')).toBeHidden();

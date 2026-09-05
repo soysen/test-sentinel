@@ -6,6 +6,8 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
+const DEFAULT_MAX_EVALUATED_MUTATIONS = 20;
+
 class DiffE2ERunner {
   constructor(projectPath) {
     this.projectPath = path.resolve(projectPath);
@@ -104,9 +106,9 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       } catch {}
     };
     const probe = this.generateProbeSpec(options);
-    const mutations = options.mutations || [];
-    const testStrategy = this.detectTestStrategy(mutations, options);
-    const testCommand = testStrategy.command;
+    const discoveredMutations = options.mutations || [];
+    const mutations = this.selectMutationSample(discoveredMutations, options.maxEvaluatedMutations);
+    const detectedTestStrategy = this.detectTestStrategy(mutations, options);
     const commandTimeoutMs = options.timeoutMs || 20000;
     const estimatedMaxMs = commandTimeoutMs * (1 + (mutations.length * 2));
     reportProgress({
@@ -118,6 +120,12 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
     });
     reportProgress({ phase: 'runtime', step: 3, percent: 15, message: `正在執行 Runtime 探針：${options.targetUrl || 'http://localhost:3000'}` });
     const probeExecution = this.runProbe(probe, commandTimeoutMs);
+    const useBootstrapProbe = !detectedTestStrategy.command && probeExecution.status === 'MEASURED';
+    const testStrategy = useBootstrapProbe
+      ? { type: 'BOOTSTRAP_PROBE', command: probeExecution.command, relatedTestFiles: [] }
+      : detectedTestStrategy;
+    const testCommand = testStrategy.command;
+    const testExecutionOptions = useBootstrapProbe ? probeExecution.executionOptions : {};
 
     if (!testCommand) {
       const runtimeMeasured = probeExecution.status === 'MEASURED';
@@ -130,20 +138,20 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       return this.buildInconclusiveResult(
         probe,
         mutations,
-        runtimeMeasured
-          ? '找不到既有測試命令；Bootstrap Runtime 探針已通過，但無法量測變異擊殺率。'
-          : '找不到既有測試命令，且 Bootstrap Runtime 探針未成功，無法取得有效評測證據。',
+        '找不到既有測試命令，且 Bootstrap Runtime 探針未成功，無法取得有效評測證據。',
         null,
-        { reasonCode: 'NO_EXISTING_BASELINE', testStrategy, probeExecution }
+        { reasonCode: 'NO_EXISTING_BASELINE', testStrategy, probeExecution, discoveredMutationCount: discoveredMutations.length }
       );
     }
 
     reportProgress({ phase: 'baseline', step: 3, percent: 20, message: `正在執行基線：${testCommand}` });
-    const baseline = this.runTestCommand(testCommand, options.timeoutMs);
+    const baseline = useBootstrapProbe
+      ? { ...probeExecution }
+      : this.runTestCommand(testCommand, commandTimeoutMs);
     baseline.command = testCommand;
     baseline.strategy = testStrategy.type;
     baseline.relatedTestFiles = testStrategy.relatedTestFiles;
-    baseline.probeExecuted = `${baseline.stdout}\n${baseline.stderr}`.includes(probe.executionMarker);
+    baseline.probeExecuted = useBootstrapProbe || `${baseline.stdout}\n${baseline.stderr}`.includes(probe.executionMarker);
     if (!baseline.passed) {
       const reasonCode = baseline.timedOut
         ? 'TEST_TIMEOUT'
@@ -154,7 +162,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
         mutations,
         '基線測試未通過，變異結果不具判定效力。',
         baseline,
-        { reasonCode, testStrategy, probeExecution }
+        { reasonCode, testStrategy, probeExecution, discoveredMutationCount: discoveredMutations.length }
       );
     }
     reportProgress({ phase: 'baseline-complete', step: 3, percent: 30, message: '基線測試通過' });
@@ -166,7 +174,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
         mutations,
         '未找到可執行的變異候選點。',
         baseline,
-        { testStrategy, probeExecution }
+        { testStrategy, probeExecution, discoveredMutationCount: discoveredMutations.length }
       );
     }
 
@@ -181,7 +189,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
         total: mutations.length,
         message: `正在執行變異 ${position}/${mutations.length}`
       });
-      const result = this.evaluateMutation(mutation, testCommand, options.timeoutMs);
+      const result = this.evaluateMutation(mutation, testCommand, commandTimeoutMs, testExecutionOptions);
       reportProgress({
         phase: 'mutation-complete',
         step: 4,
@@ -229,7 +237,14 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       { step: 1, name: 'Git Diff 萃取', desc: '鎖定變更檔案並識別邏輯關鍵行', status: 'completed' },
       { step: 2, name: '探針合成 (.test-eval)', desc: '產生隔離測試腳本，掛載全域監聽器', status: 'completed' },
       { step: 3, name: '沙盒互動與安全網', desc: '模擬使用者操作，監控 Console 與 Network', status: 'completed' },
-      { step: 4, name: '變異反向攻擊測試', desc: '注入倒轉變異運算符，檢驗斷言殺死率', status: 'completed' }
+      {
+        step: 4,
+        name: '變異反向攻擊測試',
+        desc: mutations.length < discoveredMutations.length
+          ? `從 ${discoveredMutations.length} 個候選均勻抽樣 ${mutations.length} 個，檢驗斷言殺死率`
+          : '注入倒轉變異運算符，檢驗斷言殺死率',
+        status: 'completed'
+      }
     ];
 
     const caseComparisons = mutationCases.map((result, index) => ({
@@ -264,7 +279,9 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       silentErrorsCaught: hasRuntimeEvidence ? [] : null,
       networkFailuresCaught: hasRuntimeEvidence ? [] : null,
       mutationResults: {
-        totalMutations: mutations.length,
+        totalMutations: discoveredMutations.length,
+        evaluatedMutations: mutations.length,
+        samplingApplied: mutations.length < discoveredMutations.length,
         validMutations: validCases.length,
         killedCount,
         survivedCount,
@@ -279,6 +296,20 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
 
   quoteShellArg(value) {
     return `'${String(value).replace(/'/g, `'\\''`)}'`;
+  }
+
+  selectMutationSample(mutations, requestedLimit) {
+    const parsedLimit = Number(requestedLimit);
+    const limit = Number.isInteger(parsedLimit) && parsedLimit > 0
+      ? parsedLimit
+      : DEFAULT_MAX_EVALUATED_MUTATIONS;
+    if (mutations.length <= limit) return mutations;
+    if (limit === 1) return [mutations[0]];
+
+    return Array.from({ length: limit }, (_, index) => {
+      const sourceIndex = Math.round((index * (mutations.length - 1)) / (limit - 1));
+      return mutations[sourceIndex];
+    });
   }
 
   findRelatedTestFiles(mutations = []) {
@@ -403,7 +434,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
     });
     const markerFound = `${execution.stdout}\n${execution.stderr}`.includes(probe.executionMarker);
 
-    return {
+    const evidence = {
       ...execution,
       command,
       marker: probe.executionMarker,
@@ -412,6 +443,11 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
         ? null
         : (markerFound ? 'Runtime 探針已執行但未通過。' : 'Runtime 探針未產生執行標記。')
     };
+    Object.defineProperty(evidence, 'executionOptions', {
+      value: { env: { ...process.env, NODE_PATH: nodePath } },
+      enumerable: false
+    });
+    return evidence;
   }
 
   runTestCommand(command, timeoutMs = 20000, executionOptions = {}) {
@@ -438,7 +474,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
     }
   }
 
-  evaluateMutation(mutation, testCommand, timeoutMs) {
+  evaluateMutation(mutation, testCommand, timeoutMs, executionOptions = {}) {
     const targetPath = path.resolve(this.projectPath, mutation.filePath || '');
     const evidence = { command: testCommand, filePath: mutation.filePath, exitCode: null };
     if (!targetPath.startsWith(this.projectPath + path.sep) || !fs.existsSync(targetPath)) {
@@ -469,7 +505,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
     let execution;
     try {
       fs.writeFileSync(targetPath, mutatedContent, 'utf8');
-      execution = this.runTestCommand(testCommand, timeoutMs);
+      execution = this.runTestCommand(testCommand, timeoutMs, executionOptions);
       Object.assign(evidence, execution);
     } finally {
       fs.writeFileSync(targetPath, originalContent, 'utf8');
@@ -483,7 +519,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       return { mutation, status: 'INVALID', reason: '測試因逾時、語法或環境錯誤失敗，不能計為擊殺。', evidence };
     }
 
-    const restoredBaseline = this.runTestCommand(testCommand, timeoutMs);
+    const restoredBaseline = this.runTestCommand(testCommand, timeoutMs, executionOptions);
     evidence.restoredBaseline = {
       passed: restoredBaseline.passed,
       exitCode: restoredBaseline.exitCode,
@@ -524,7 +560,9 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       silentErrorsCaught: hasRuntimeEvidence ? [] : null,
       networkFailuresCaught: hasRuntimeEvidence ? [] : null,
       mutationResults: {
-        totalMutations: mutations.length,
+        totalMutations: metadata.discoveredMutationCount ?? mutations.length,
+        evaluatedMutations: 0,
+        samplingApplied: false,
         validMutations: 0,
         killedCount: 0,
         survivedCount: 0,

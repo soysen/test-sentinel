@@ -2801,6 +2801,20 @@ body {
   }
 }
 
+@media (min-width: 1025px) and (max-width: 1499px) {
+  body {
+    overflow-x: auto;
+  }
+
+  .app-layout {
+    min-width: 1500px;
+  }
+
+  .four-column-dashboard {
+    overflow-x: visible;
+  }
+}
+
 /* ==========================================================================
    模式 A 路徑範圍選測 (Path Scope Tree & Glob Styles)
    ========================================================================== */

@@ -447,6 +447,7 @@ class DiffAnalyzer {
     if (!supportedExtensions.has(extension) || !this.isMutableSourceFile(filePath)) return [];
 
     const candidates = [];
+  const maskState = { inJsxTag: false, jsxQuote: null };
     const operatorMap = [
       { pattern: /===/g, replacement: '!==', desc: 'Invert equality (=== to !==)' },
       { pattern: /!==/g, replacement: '===', desc: 'Invert inequality (!== to ===)' },
@@ -466,7 +467,7 @@ class DiffAnalyzer {
       // 忽略註解與空行
       const trimmed = line.trim();
       if (trimmed.startsWith('//') || trimmed.startsWith('/*') || !trimmed) return;
-      const executableLine = this.maskNonCodeSegments(line, extension);
+      const executableLine = this.maskNonCodeSegments(line, extension, maskState);
 
       for (const op of operatorMap) {
         for (const match of executableLine.matchAll(op.pattern)) {
@@ -492,14 +493,27 @@ class DiffAnalyzer {
     return !/(^|\/)(?:playwright|vitest|jest|webpack|vite|eslint|babel|rollup)\.config\.[cm]?[jt]s$/i.test(normalized);
   }
 
-  maskNonCodeSegments(line, extension = '') {
+  maskNonCodeSegments(line, extension = '', state = {}) {
     const masked = [...line];
     let quote = null;
     let escaped = false;
+    const supportsJsx = ['.js', '.jsx', '.tsx'].includes(extension);
 
     for (let index = 0; index < line.length; index++) {
       const char = line[index];
       const next = line[index + 1];
+
+      if (state.inJsxTag) {
+        masked[index] = ' ';
+        if (state.jsxQuote) {
+          if (char === state.jsxQuote && line[index - 1] !== '\\') state.jsxQuote = null;
+        } else if (char === '"' || char === "'") {
+          state.jsxQuote = char;
+        } else if (char === '>') {
+          state.inJsxTag = false;
+        }
+        continue;
+      }
 
       if (quote) {
         masked[index] = ' ';
@@ -519,17 +533,19 @@ class DiffAnalyzer {
         continue;
       }
 
+      if (supportsJsx && char === '<' && /^<\/?(?:[A-Za-z][\w:.-]*)(?=[\s/>.]|$)|^<>/.test(line.slice(index))) {
+        state.inJsxTag = true;
+        masked[index] = ' ';
+        continue;
+      }
+
       if (char === '/' && (next === '/' || next === '*')) {
         for (let rest = index; rest < line.length; rest++) masked[rest] = ' ';
         break;
       }
     }
 
-    let executableLine = masked.join('');
-    if (extension === '.jsx' || extension === '.tsx') {
-      executableLine = executableLine.replace(/<\/?[A-Za-z][^>]*>|<\/?\s*>/g, match => ' '.repeat(match.length));
-    }
-    return executableLine;
+    return masked.join('');
   }
 }
 
