@@ -15,7 +15,8 @@ const { exec } = require('child_process');
 
 const { ProjectScanner } = require('../core/scanner');
 const { GitNexusBridge } = require('../core/gitnexus');
-const { DiffAnalyzer } = require('../core/diff-analyzer');
+const { DiffAnalyzer, PathScopeValidationError } = require('../core/diff-analyzer');
+const { ProjectSourceAnalyzer } = require('../core/project-source-analyzer');
 const { AstMockExtractor } = require('../core/mock-engine/ast-extractor');
 const { MockErrorHealer } = require('../core/mock-engine/error-healer');
 const { HarMockManager } = require('../core/mock-engine/har-manager');
@@ -102,6 +103,7 @@ const server = http.createServer((req, res) => {
   // 測案預覽與目的解說端點 (Step 1: Preview)
   if (pathname === "/api/cases/preview" && req.method === "POST") {
     return readJsonBody((err, body) => {
+      if (err) return jsonResponse({ error: 'Invalid JSON' }, 400);
       try {
         if (body.projectPath) {
           body.projectPath = resolveUserPath(body.projectPath);
@@ -109,6 +111,9 @@ const server = http.createServer((req, res) => {
         const preview = getCasesPreview(body);
         return jsonResponse(preview);
       } catch (e) {
+        if (e instanceof PathScopeValidationError || e.statusCode === 400 || e.code === 'INVALID_PATH_SCOPE' || e.code === 'EMPTY_PATH_SCOPE') {
+          return jsonResponse({ error: e.message, code: e.code || 'INVALID_PATH_SCOPE' }, 400);
+        }
         return jsonResponse({ error: e.message }, 500);
       }
     });
@@ -230,12 +235,33 @@ const server = http.createServer((req, res) => {
 
   if (pathname === '/api/inspect/diff' && req.method === 'POST') {
     return readJsonBody((err, body) => {
+      if (err) return jsonResponse({ error: 'Invalid JSON' }, 400);
       try {
         const projectPath = resolveUserPath(body.projectPath);
         const analyzer = new DiffAnalyzer(projectPath);
-        const diffData = analyzer.getDiff(body.scope || 'all');
+        const diffData = analyzer.getDiff(body.scope || 'all', body.pathScope || null);
         return jsonResponse(diffData);
       } catch (e) {
+        if (e instanceof PathScopeValidationError || e.statusCode === 400 || e.code === 'INVALID_PATH_SCOPE' || e.code === 'EMPTY_PATH_SCOPE') {
+          return jsonResponse({ error: e.message, code: e.code || 'INVALID_PATH_SCOPE' }, 400);
+        }
+        return jsonResponse({ error: e.message }, 500);
+      }
+    });
+  }
+
+  if (pathname === '/api/inspect/project-files' && req.method === 'POST') {
+    return readJsonBody((err, body) => {
+      if (err) return jsonResponse({ error: 'Invalid JSON' }, 400);
+      try {
+        const projectPath = resolveUserPath(body.projectPath);
+        const analyzer = new ProjectSourceAnalyzer(projectPath);
+        const filesData = analyzer.getProjectFiles();
+        return jsonResponse(filesData);
+      } catch (e) {
+        if (e instanceof PathScopeValidationError || e.statusCode === 400) {
+          return jsonResponse({ error: e.message, code: e.code || 'INVALID_PATH_SCOPE' }, 400);
+        }
         return jsonResponse({ error: e.message }, 500);
       }
     });
@@ -258,23 +284,85 @@ const server = http.createServer((req, res) => {
     }
   }
 
-  // 模式 A: Diff E2E 跑測與變異打分
+  // 模式 A: Diff / Project E2E 跑測與變異打分
   if (pathname === '/api/run/diff-e2e' && req.method === 'POST') {
     return readJsonBody(async (err, body) => {
       if (err) return jsonResponse({ error: 'Invalid JSON' }, 400);
       try {
         const projectPath = resolveUserPath(body.projectPath);
+        const sourceMode = body.sourceMode === 'project' ? 'project' : 'diff';
+        const canonicalScope = DiffAnalyzer.canonicalizePathScope(body.pathScope || null);
+
+        const rawSuppliedMutations = Array.isArray(body.mutations)
+          ? body.mutations.filter(mutation => mutation && mutation.filePath && mutation.originalLine && mutation.mutatedLine)
+          : [];
+
+        let mutations = [];
+        let executionFiles = [];
+        let summaryData = null;
+
+        if (sourceMode === 'project') {
+          const projectAnalyzer = new ProjectSourceAnalyzer(projectPath);
+          const projectData = projectAnalyzer.getProjectMutations(canonicalScope);
+          executionFiles = projectData.files;
+          summaryData = {
+            totalFiles: projectData.summary.totalFiles,
+            addedLines: 0,
+            removedLines: 0
+          };
+
+          if (rawSuppliedMutations.length > 0) {
+            const allowedFilePaths = new Set(executionFiles.map(file => file.filePath));
+            const inScopeSupplied = rawSuppliedMutations.filter(m => allowedFilePaths.has(m.filePath));
+            if (inScopeSupplied.length === 0) {
+              throw new PathScopeValidationError('提供的變異點皆超出所選路徑範圍，無法執行。', 'INVALID_PATH_SCOPE');
+            }
+            mutations = inScopeSupplied;
+          } else {
+            mutations = projectData.mutations;
+          }
+        } else {
+          // sourceMode === 'diff'
+          const analyzer = new DiffAnalyzer(projectPath);
+          const diffData = analyzer.getDiff(body.scope || 'all', canonicalScope);
+          executionFiles = diffData.files || [];
+          summaryData = diffData.summary || body.diffSummary;
+
+          if (canonicalScope) {
+            if (!diffData.files || diffData.files.length === 0) {
+              throw new PathScopeValidationError('指定路徑範圍無任何變更檔案匹配，無法執行測試。', 'EMPTY_PATH_SCOPE');
+            }
+            const allowedFilePaths = new Set(diffData.files.map(file => file.filePath));
+            const inScopeSuppliedMutations = rawSuppliedMutations.filter(mutation => allowedFilePaths.has(mutation.filePath));
+
+            if (rawSuppliedMutations.length > 0 && inScopeSuppliedMutations.length === 0) {
+              throw new PathScopeValidationError('提供的變異點皆超出所選路徑範圍，無法執行。', 'INVALID_PATH_SCOPE');
+            }
+
+            mutations = inScopeSuppliedMutations.length > 0
+              ? inScopeSuppliedMutations
+              : diffData.files.flatMap(file => file.mutationCandidates);
+          } else {
+            if (rawSuppliedMutations.length > 0) {
+              mutations = rawSuppliedMutations;
+            } else if (diffData.files && diffData.files.length > 0) {
+              mutations = diffData.files.flatMap(file => file.mutationCandidates);
+            } else {
+              return jsonResponse({ error: '無變更檔案或變異點可執行測試。' }, 400);
+            }
+          }
+        }
+
+        if (mutations.length === 0) {
+          return jsonResponse({ error: '所選路徑範圍無任何可測試的變異點。' }, 400);
+        }
+
         const onProgress = progress => sendSse('evaluation_progress', {
           evaluationId: body.evaluationId || null,
           mode: 'diff-e2e',
           ...progress
         });
-        const suppliedMutations = Array.isArray(body.mutations)
-          ? body.mutations.filter(mutation => mutation.filePath && mutation.originalLine && mutation.mutatedLine)
-          : [];
-        const mutations = suppliedMutations.length > 0
-          ? suppliedMutations
-          : new DiffAnalyzer(projectPath).getDiff(body.scope || 'all').files.flatMap(file => file.mutationCandidates);
+
         const result = await runEvaluationWorker('diff-e2e', projectPath, {
           ...body,
           projectPath,
@@ -283,23 +371,49 @@ const server = http.createServer((req, res) => {
 
         // 結合評分器
         const scorecard = QualityScorer.computeScorecard({
-          diffSummary: body.diffSummary,
+          diffSummary: summaryData,
           impactData: body.impactData,
           e2eResult: result,
           mockData: body.mockData
         });
 
-        // 儲存至歷史紀錄並計算基準差異
+        // 儲存至歷史紀錄並計算基準差異 (按 sourceMode 隔離 Baseline Target)
         const historyMgr = new HistoryManager(projectPath || process.cwd());
-        const targetName = body.targetFile ? path.basename(body.targetFile) : 'all-diffs';
+        let targetName = '';
+        if (sourceMode === 'project') {
+          targetName = canonicalScope && canonicalScope.hash
+            ? `project-scope-${canonicalScope.hash}`
+            : 'project-all';
+        } else {
+          targetName = canonicalScope && canonicalScope.hash
+            ? `diff-scope-${canonicalScope.hash}`
+            : (body.targetFile ? path.basename(body.targetFile) : 'all-diffs');
+        }
+
         const baseline = historyMgr.getLatestBaseline('diff-e2e', targetName);
-        const remediation = buildRemediationPlan({ mode: 'diff-e2e', projectPath, report: { result, scorecard } });
-        const report = { result, scorecard, remediation };
+        const remediation = buildRemediationPlan({ mode: 'diff-e2e', projectPath, report: { result, scorecard, sourceMode } });
+        const report = {
+          result,
+          scorecard,
+          remediation,
+          sourceMode,
+          ...(canonicalScope ? {
+            scopeMetadata: {
+              selectedPaths: canonicalScope.selectedPaths,
+              includePatterns: canonicalScope.includePatterns,
+              excludePatterns: canonicalScope.excludePatterns,
+              hash: canonicalScope.hash
+            }
+          } : {})
+        };
         const saved = historyMgr.saveReport('diff-e2e', targetName, report);
         const diff = historyMgr.computeDiff(report, baseline);
 
         return jsonResponse({ ...report, saved, diff, hasBaseline: !!baseline });
       } catch (e) {
+        if (e instanceof PathScopeValidationError || e.statusCode === 400 || ['INVALID_PATH_SCOPE', 'EMPTY_PATH_SCOPE', 'FILE_TOO_LARGE', 'TOO_MANY_FILES', 'TOO_MANY_MUTATIONS'].includes(e.code)) {
+          return jsonResponse({ error: e.message, code: e.code || 'INVALID_PATH_SCOPE' }, 400);
+        }
         return jsonResponse({ error: e.message }, 500);
       }
     });

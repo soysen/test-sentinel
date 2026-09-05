@@ -9,7 +9,8 @@ const os = require('os');
 
 const { ProjectScanner } = require('../src/core/scanner');
 const { GitNexusBridge } = require('../src/core/gitnexus');
-const { DiffAnalyzer } = require('../src/core/diff-analyzer');
+const { DiffAnalyzer, PathScopeValidationError } = require('../src/core/diff-analyzer');
+const { ProjectSourceAnalyzer, MAX_FILE_SIZE, MAX_TOTAL_FILES, MAX_TOTAL_MUTATIONS } = require('../src/core/project-source-analyzer');
 const { AstMockExtractor } = require('../src/core/mock-engine/ast-extractor');
 const { MockErrorHealer } = require('../src/core/mock-engine/error-healer');
 const { HarMockManager } = require('../src/core/mock-engine/har-manager');
@@ -174,8 +175,262 @@ assert(diffProgress.some(progress => progress.phase === 'baseline'), 'Diff evalu
 assert(diffProgress.filter(progress => progress.phase === 'mutation').length === 2, 'Diff evaluation must report each mutation progress');
 assert(diffProgress.at(-1).phase === 'complete', 'Diff evaluation must report completion');
 assert(fs.readFileSync(path.join(diffFixture, 'subject.js'), 'utf8') === originalSubject, 'Mutated source must be restored');
+const targetedStrategy = e2eRunner.detectTestStrategy([{ filePath: 'subject.js' }], { sourceMode: 'project' });
+assert.strictEqual(targetedStrategy.type, 'TARGETED', 'Project source mode should use a related test when one exists');
+assert(targetedStrategy.command.includes('subject.test.js'), 'Targeted command should identify the related test file');
+const targetedEvalResult = e2eRunner.runEvaluation({
+  sourceMode: 'project',
+  mutations: [{
+    type: 'Flip exported boolean',
+    filePath: 'subject.js',
+    originalLine: 'module.exports = true;',
+    mutatedLine: 'module.exports = false;'
+  }]
+});
+assert.strictEqual(targetedEvalResult.status, 'MEASURED', 'Auto-detected related test should produce measured project-mode evidence');
+assert.strictEqual(targetedEvalResult.testStrategy.type, 'TARGETED', 'Measured result should disclose targeted test strategy');
+assert.deepStrictEqual(targetedEvalResult.testStrategy.relatedTestFiles, ['subject.test.js'], 'Measured result should identify the related test file');
+assert.strictEqual(targetedEvalResult.mutationResults.killedCount, 1, 'Related test should kill the project-file mutation');
+const explicitStrategy = e2eRunner.detectTestStrategy([], { sourceMode: 'project', testCommand: 'node custom-check.js' });
+assert.strictEqual(explicitStrategy.type, 'USER_SUPPLIED', 'User-supplied test command must take precedence');
 fs.rmSync(diffFixture, { recursive: true, force: true });
-console.log('   ✅ Diff E2E Runner verified with killed/survived controls and restoration.');
+
+// 模式 A 路徑範圍選測 (Path Scoped Selection) 深度自檢
+const gitFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinel-git-diff-'));
+const { execFileSync } = require('child_process');
+const execGit = (args) => {
+  return execFileSync('git', args, {
+    cwd: gitFixture,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_AUTHOR_NAME: 'Test',
+      GIT_AUTHOR_EMAIL: 'test@example.com',
+      GIT_COMMITTER_NAME: 'Test',
+      GIT_COMMITTER_EMAIL: 'test@example.com'
+    }
+  });
+};
+
+execGit(['-c', 'init.defaultBranch=main', 'init']);
+execGit(['config', 'user.name', 'Test']);
+execGit(['config', 'user.email', 'test@example.com']);
+fs.mkdirSync(path.join(gitFixture, 'src', 'core'), { recursive: true });
+fs.mkdirSync(path.join(gitFixture, 'src', 'web'), { recursive: true });
+fs.mkdirSync(path.join(gitFixture, 'tests'), { recursive: true });
+
+fs.writeFileSync(path.join(gitFixture, 'src', 'core', 'a.js'), 'const a = 1;\nmodule.exports = a === 1;\n');
+fs.writeFileSync(path.join(gitFixture, 'src', 'core', 'b.js'), 'const b = 1;\nmodule.exports = b === 1;\n');
+fs.writeFileSync(path.join(gitFixture, 'src', 'web', 'c.js'), 'const c = 1;\nmodule.exports = c === 1;\n');
+fs.writeFileSync(path.join(gitFixture, 'tests', 'a.spec.js'), 'const test = 1;\n');
+execGit(['add', '.']);
+execGit(['commit', '-m', 'initial']);
+
+fs.writeFileSync(path.join(gitFixture, 'src', 'core', 'a.js'), 'const a = 2;\nmodule.exports = a === 2;\n');
+fs.writeFileSync(path.join(gitFixture, 'src', 'core', 'b.js'), 'const b = 2;\nmodule.exports = b === 2;\n');
+fs.writeFileSync(path.join(gitFixture, 'src', 'web', 'c.js'), 'const c = 2;\nmodule.exports = c === 2;\n');
+fs.writeFileSync(path.join(gitFixture, 'tests', 'a.spec.js'), 'const test = 2;\n');
+
+const gitAnalyzer = new DiffAnalyzer(gitFixture);
+
+// 1. 未篩選 (Unfiltered)
+const diffAll = gitAnalyzer.getDiff('all');
+assert.strictEqual(diffAll.files.length, 4, 'Unfiltered diff should match all changed files');
+assert(!diffAll.scopeMetadata, 'Unfiltered diff should have no scopeMetadata');
+
+// 2. 單檔 (Single file)
+const diffSingle = gitAnalyzer.getDiff('all', { selectedPaths: ['src/core/a.js'] });
+assert.strictEqual(diffSingle.files.length, 1, 'Single path scope should match exactly 1 file');
+assert.strictEqual(diffSingle.files[0].filePath, 'src/core/a.js', 'Matched file must be src/core/a.js');
+assert(diffSingle.scopeMetadata && diffSingle.scopeMetadata.hash, 'Scoped diff must contain scope hash');
+
+// 3. 資料夾 (Directory)
+const diffDir = gitAnalyzer.getDiff('all', { selectedPaths: ['src/core'] });
+assert.strictEqual(diffDir.files.length, 2, 'Directory path scope should match all files inside folder');
+assert(diffDir.files.every(f => f.filePath.startsWith('src/core/')), 'All files must be in src/core');
+
+// 4. Include glob
+const diffInclude = gitAnalyzer.getDiff('all', { includePatterns: ['src/**/*.js'] });
+assert.strictEqual(diffInclude.files.length, 3, 'Include glob should match 3 js files in src');
+
+// 5. Exclude glob (!pattern)
+const diffExclude = gitAnalyzer.getDiff('all', { excludePatterns: ['**/*.spec.js'] });
+assert.strictEqual(diffExclude.files.length, 3, 'Exclude glob should exclude spec files');
+assert(!diffExclude.files.some(f => f.filePath.endsWith('.spec.js')), 'No spec files should remain');
+
+// 5b. Multiline pattern string (每行一個 pattern，!pattern 為排除)
+const diffPatternString = gitAnalyzer.getDiff('all', 'src/**/*.js\n!src/web/**');
+assert.strictEqual(diffPatternString.files.length, 2, 'Multiline pattern string should match src/core js files');
+
+// 6. Git scope 交集 (selectedPaths ∩ includePatterns) 與 exclude 優先序
+const diffIntersection = gitAnalyzer.getDiff('all', { selectedPaths: ['src/core'], excludePatterns: ['*b.js'] });
+assert.strictEqual(diffIntersection.files.length, 1, 'Intersection of directory and exclude should match 1 file');
+assert.strictEqual(diffIntersection.files[0].filePath, 'src/core/a.js');
+
+const diffSelectedAndInclude = gitAnalyzer.getDiff('all', {
+  selectedPaths: ['src/core/a.js', 'src/core/b.js', 'src/web/c.js'],
+  includePatterns: ['*a.js']
+});
+assert.strictEqual(diffSelectedAndInclude.files.length, 1, 'selectedPaths ∩ includePatterns must match 1 file');
+assert.strictEqual(diffSelectedAndInclude.files[0].filePath, 'src/core/a.js');
+
+const diffSelectedIncludeExclude = gitAnalyzer.getDiff('all', {
+  selectedPaths: ['src/core'],
+  includePatterns: ['src/**/*.js'],
+  excludePatterns: ['*b.js']
+});
+assert.strictEqual(diffSelectedIncludeExclude.files.length, 1, 'selectedPaths ∩ includePatterns \\ excludePatterns must match 1 file');
+assert.strictEqual(diffSelectedIncludeExclude.files[0].filePath, 'src/core/a.js');
+
+// 7. 空匹配 (Empty match)
+const diffEmptySelection = gitAnalyzer.getDiff('all', { selectedPaths: [] });
+assert.strictEqual(diffEmptySelection.files.length, 0, 'Empty selectedPaths must produce 0 files');
+const diffNoMatch = gitAnalyzer.getDiff('all', { includePatterns: ['nonexistent/**'] });
+assert.strictEqual(diffNoMatch.files.length, 0, 'Non-matching glob must produce 0 files');
+
+// 8. 惡意路徑防禦 (Malicious paths: 絕對路徑、.. 穿越、NUL 與無效語法)
+assert.throws(() => gitAnalyzer.getDiff('all', { selectedPaths: ['/etc/passwd'] }), err => {
+  return err instanceof PathScopeValidationError && err.statusCode === 400 && err.code === 'INVALID_PATH_SCOPE' && /absolute/i.test(err.message);
+}, 'Absolute path must throw PathScopeValidationError');
+assert.throws(() => gitAnalyzer.getDiff('all', { selectedPaths: ['C:\\Windows\\system32'] }), /absolute/i, 'Windows absolute path must be rejected');
+assert.throws(() => gitAnalyzer.getDiff('all', { selectedPaths: ['../secret.js'] }), /traversal/i, 'Directory traversal must be rejected');
+assert.throws(() => gitAnalyzer.getDiff('all', { selectedPaths: ['src/../../secret.js'] }), /traversal/i, 'Nested traversal must be rejected');
+assert.throws(() => gitAnalyzer.getDiff('all', { selectedPaths: ['src/\0evil.js'] }), /null byte/i, 'NUL byte must be rejected');
+assert.throws(() => gitAnalyzer.getDiff('all', { selectedPaths: [':invalid:syntax'] }), /invalid pathspec/i, 'Invalid pathspec syntax must be rejected');
+
+// 9. Canonical Scope & Hash 一致性
+const scope1 = DiffAnalyzer.canonicalizePathScope({ selectedPaths: ['src/web/c.js', 'src/core/a.js'] });
+const scope2 = DiffAnalyzer.canonicalizePathScope({ selectedPaths: ['src/core/a.js', 'src/web/c.js'] });
+assert.strictEqual(scope1.hash, scope2.hash, 'Path scope hash must be order-independent');
+
+// 10. Preview 與 Run 一致性與零匹配檢驗
+const previewWithScope = getCasesPreview({
+  mode: 'diff-e2e',
+  projectPath: gitFixture,
+  pathScope: { selectedPaths: ['src/core/a.js'] }
+});
+assert.deepStrictEqual(previewWithScope.matchedFiles, ['src/core/a.js'], 'Preview matched files must match path scope');
+assert(previewWithScope.plannedCases.length > 0, 'Preview should generate planned cases for in-scope mutations');
+assert.throws(() => getCasesPreview({
+  mode: 'diff-e2e',
+  projectPath: gitFixture,
+  pathScope: { selectedPaths: [] }
+}), err => {
+  return err instanceof PathScopeValidationError && err.statusCode === 400 && err.code === 'EMPTY_PATH_SCOPE';
+}, 'Preview must throw PathScopeValidationError with EMPTY_PATH_SCOPE when 0 files match');
+
+// 11. HistoryManager Baseline 隔離與 metadata 保存驗證
+const scopedHistoryManager = new HistoryManager(gitFixture);
+const scopeHash = scope1.hash;
+const isolatedTarget = `diff-scope-${scopeHash}`;
+const fakeReport = {
+  result: { status: 'MEASURED', caseComparisons: [] },
+  scorecard: { overallScore: 85 },
+  scopeMetadata: scope1
+};
+const savedScoped = scopedHistoryManager.saveReport('diff-e2e', isolatedTarget, fakeReport);
+assert(fs.existsSync(savedScoped.latestPath), 'Scoped baseline must be written');
+const retrievedBaseline = scopedHistoryManager.getLatestBaseline('diff-e2e', isolatedTarget);
+assert.strictEqual(retrievedBaseline.scopeMetadata.hash, scopeHash, 'Retrieved baseline must preserve scopeMetadata');
+const allDiffBaseline = scopedHistoryManager.getLatestBaseline('diff-e2e', 'all-diffs');
+assert.strictEqual(allDiffBaseline, null, 'Scoped baseline must not pollute all-diffs baseline');
+
+// 12. Glob character class brackets [...] 支援與未支援語法拋錯測試
+assert.strictEqual(DiffAnalyzer.matchesPattern('src/a.js', 'src/[a-z].js'), true, 'Character range [a-z] should match a.js');
+assert.strictEqual(DiffAnalyzer.matchesPattern('src/1.js', 'src/[a-z].js'), false, 'Character range [a-z] should not match 1.js');
+assert.strictEqual(DiffAnalyzer.matchesPattern('src/1.js', 'src/[!a-z].js'), true, 'Negated character range [!a-z] should match 1.js');
+assert.strictEqual(DiffAnalyzer.matchesPattern('src/a.js', 'src/[^a-z].js'), false, 'Negated character range [^a-z] should not match a.js');
+assert.throws(() => gitAnalyzer.getDiff('all', { includePatterns: ['src/[a-z.js'] }), err => {
+  return err instanceof PathScopeValidationError && err.statusCode === 400 && /unclosed/i.test(err.message);
+}, 'Unclosed bracket should throw PathScopeValidationError');
+assert.throws(() => gitAnalyzer.getDiff('all', { includePatterns: ['src/{a,b}.js'] }), err => {
+  return err instanceof PathScopeValidationError && err.statusCode === 400 && /brace expansion/i.test(err.message);
+}, 'Brace expansion should throw PathScopeValidationError');
+
+// 13. ProjectSourceAnalyzer 專案檔案範圍列舉、安全防護與變異提取測試
+const projectAnalyzer = new ProjectSourceAnalyzer(gitFixture);
+const projFiles = projectAnalyzer.getProjectFiles();
+assert(projFiles.summary.totalFiles >= 4, 'Project analyzer should find files in git repo');
+const mutableFilePaths = projFiles.files.filter(f => f.isMutable).map(f => f.filePath);
+assert(mutableFilePaths.includes('src/core/a.js'), 'src/core/a.js should be mutable');
+assert(!mutableFilePaths.includes('tests/a.spec.js'), 'tests/a.spec.js should not be mutable');
+
+const allProjectMutations = projectAnalyzer.getProjectMutations();
+assert(allProjectMutations.mutations.length > 0, 'Should extract mutations from project files');
+assert(allProjectMutations.mutations.every(m => typeof m.lineNumber === 'number' && m.lineNumber > 0), 'Every project mutation must have a positive 1-based lineNumber');
+
+// 測試預覽模式 (sourceMode: 'project')
+const projectPreview = getCasesPreview({
+  mode: 'diff-e2e',
+  projectPath: gitFixture,
+  sourceMode: 'project',
+  pathScope: { selectedPaths: ['src/core/a.js'] }
+});
+assert.strictEqual(projectPreview.matchedFiles.length, 1, 'Project preview should match 1 file');
+assert.strictEqual(projectPreview.sourceMode, 'project', 'Preview sourceMode must be project');
+assert(projectPreview.plannedCases[2].input.includes(':2'), 'Planned case should show real lineNumber');
+
+// 14. 測試非 Git 目錄之 fs walker fallback 與黑名單、symlink 略過
+const nonGitFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinel-nongit-'));
+fs.mkdirSync(path.join(nonGitFixture, 'src', 'utils'), { recursive: true });
+fs.mkdirSync(path.join(nonGitFixture, 'node_modules', 'pkg'), { recursive: true });
+fs.mkdirSync(path.join(nonGitFixture, '.gitnexus'), { recursive: true });
+fs.writeFileSync(path.join(nonGitFixture, 'src', 'utils', 'calc.js'), 'function calc(x) {\n  if (x === 1) return true;\n  return false;\n}\nmodule.exports = { calc };\n');
+fs.writeFileSync(path.join(nonGitFixture, 'node_modules', 'pkg', 'index.js'), 'module.exports = true;\n');
+fs.writeFileSync(path.join(nonGitFixture, '.gitnexus', 'meta.json'), '{}');
+
+const nonGitAnalyzer = new ProjectSourceAnalyzer(nonGitFixture);
+const nonGitResult = nonGitAnalyzer.getProjectMutations();
+assert.strictEqual(nonGitResult.files.length, 1, 'fs walker must ignore node_modules and .gitnexus');
+assert.strictEqual(nonGitResult.files[0].filePath, 'src/utils/calc.js');
+assert.strictEqual(nonGitResult.mutations.length, 3, 'calc.js should yield 3 mutations (===, true, false)');
+assert.strictEqual(nonGitResult.mutations[0].lineNumber, 2, 'First mutation should be on line 2');
+
+// 15. 測試單檔 > 1MB 拋錯 (FILE_TOO_LARGE)
+const largeFilePath = path.join(nonGitFixture, 'src', 'utils', 'large.js');
+const largeBuf = Buffer.alloc(1024 * 1024 + 100, 'a = 1;\n');
+fs.writeFileSync(largeFilePath, largeBuf);
+assert.throws(() => nonGitAnalyzer.getProjectMutations({ selectedPaths: ['src/utils/large.js'] }), err => {
+  return err instanceof PathScopeValidationError && err.statusCode === 400 && err.code === 'FILE_TOO_LARGE';
+}, 'Files exceeding 1MB must throw FILE_TOO_LARGE 400 error');
+fs.unlinkSync(largeFilePath);
+
+// 16. 測試 DiffE2ERunner 多處相同 originalLine 且帶 lineNumber 之精準替換
+const duplicateFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinel-dup-'));
+fs.writeFileSync(path.join(duplicateFixture, 'package.json'), JSON.stringify({ scripts: { test: 'node test.js' } }));
+// 檔案中第 2 行與第 4 行皆為相同內容 "  if (a === 1) return 10;"
+const dupContent = 'function test(a) {\n  if (a === 1) return 10;\n  let b = 2;\n  if (a === 1) return 10;\n  return 0;\n}\nmodule.exports = { test };\n';
+fs.writeFileSync(path.join(duplicateFixture, 'index.js'), dupContent);
+fs.writeFileSync(path.join(duplicateFixture, 'test.js'), 'const { test } = require("./index");\nconst assert = require("assert");\nassert.strictEqual(test(1), 10);\nassert.strictEqual(test(2), 0);\n');
+
+const dupRunner = new DiffE2ERunner(duplicateFixture);
+// 若無 lineNumber，命中 2 次會被拒絕為 INVALID
+const evalNoLineNumber = dupRunner.evaluateMutation({
+  filePath: 'index.js',
+  originalLine: '  if (a === 1) return 10;',
+  mutatedLine: '  if (a !== 1) return 10;',
+  type: 'Invert equality'
+}, 'node test.js', 5000);
+assert.strictEqual(evalNoLineNumber.status, 'INVALID', 'Duplicate line without lineNumber must be rejected');
+
+// 若有精確 lineNumber: 2，成功替換第 2 行並被測試擊殺 (KILLED)
+const evalWithLineNumber = dupRunner.evaluateMutation({
+  filePath: 'index.js',
+  lineNumber: 2,
+  originalLine: '  if (a === 1) return 10;',
+  mutatedLine: '  if (a !== 1) return 10;',
+  type: 'Invert equality'
+}, 'node test.js', 5000);
+assert.strictEqual(evalWithLineNumber.status, 'KILLED', 'Accurate line replacement by lineNumber must succeed and be killed');
+assert.strictEqual(fs.readFileSync(path.join(duplicateFixture, 'index.js'), 'utf8'), dupContent, 'Original file must be restored after evaluation');
+
+fs.rmSync(duplicateFixture, { recursive: true, force: true });
+fs.rmSync(nonGitFixture, { recursive: true, force: true });
+
+fs.rmSync(gitFixture, { recursive: true, force: true });
+console.log('   ✅ Diff E2E Runner and Path Scoped Selection verified with git pathspecs, security barriers, and baseline isolation.');
 
 // 6. Skill Evaluator Test (模式 B)
 console.log('6. Testing SkillEvaluator (模式 B)...');
@@ -312,6 +567,34 @@ assert(locatedDiffRemediation.aiPrompt.includes('檔案: src/example.js'), 'Diff
 assert(locatedDiffRemediation.aiPrompt.includes('原始內容: enabled === true'), 'Diff remediation prompt should include original code');
 assert(locatedDiffRemediation.aiPrompt.includes('變異內容: enabled !== true'), 'Diff remediation prompt should include mutated code');
 assert(locatedDiffRemediation.aiPrompt.includes('不得直接修改 .test-eval/diff-probes/'), 'Diff remediation prompt should protect ephemeral probes');
+const failedBaselineRemediation = buildRemediationPlan({
+  mode: 'diff-e2e',
+  projectPath: '/tmp/sample-project',
+  report: {
+    sourceMode: 'project',
+    result: {
+      status: 'INCONCLUSIVE',
+      reason: '基線測試未通過，變異結果不具判定效力。',
+      baselinePassed: false,
+      baselineEvidence: { command: 'npm test', exitCode: 1, stdout: '', stderr: 'existing failure' },
+      caseComparisons: []
+    },
+    scorecard: { overallScore: null, metrics: { mutationKillRate: null }, evidence: { runtimeSafety: 'NOT_MEASURED' } }
+  }
+});
+assert(failedBaselineRemediation.actions.some(action => action.title.includes('測試命令')), 'Baseline remediation should identify command configuration before blaming product code');
+assert(failedBaselineRemediation.aiPrompt.includes('命令：npm test'), 'Baseline remediation should preserve the actual failed command');
+assert(!failedBaselineRemediation.aiPrompt.includes('列出的存活變異應被擊殺'), 'No survived mutation instruction should be emitted without survived mutations');
+const failedCommandFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinel-failed-command-'));
+fs.writeFileSync(path.join(failedCommandFixture, 'package.json'), JSON.stringify({ scripts: { test: 'node -e "process.exit(1)"' } }));
+const failedCommandResult = new DiffE2ERunner(failedCommandFixture).runEvaluation({
+  sourceMode: 'project',
+  mutations: [{ filePath: 'missing.js', originalLine: 'true', mutatedLine: 'false' }]
+});
+assert.strictEqual(failedCommandResult.status, 'INCONCLUSIVE', 'Failed baseline should remain inconclusive');
+assert.strictEqual(failedCommandResult.baselineEvidence.command, 'npm run test', 'Failed baseline evidence must preserve the selected command');
+assert.strictEqual(failedCommandResult.reasonCode, 'TEST_BASELINE_FAILED', 'Failed baseline should expose a stable reason code');
+fs.rmSync(failedCommandFixture, { recursive: true, force: true });
 const harnessRemediation = buildRemediationPlan({
   mode: 'harness-eval',
   projectPath: harnessFixture,

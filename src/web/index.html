@@ -47,14 +47,14 @@
     </header>
 
     <!-- 主體內容區 (即時評測工作區) -->
-    <main class="dashboard-body" id="workspaceView">
-      <!-- 側邊欄：專案選擇與架構概覽 (移動至此) -->
-      <aside class="sidebar-card">
-        <div class="section-title">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          </svg>
-          <span>專案選擇與架構概覽</span>
+    <!-- 主體內容區 (可各自獨立上下捲動的 4 欄工作區) -->
+    <main class="dashboard-body four-column-dashboard" id="workspaceView">
+
+      <!-- 欄位 01：專案選擇與架構概覽 -->
+      <section class="dashboard-col col-01-project" id="col01Project">
+        <div class="col-stage-header">
+          <span class="col-step-tag">01</span>
+          <h3>專案選擇與架構概覽</h3>
         </div>
 
         <!-- 專案路徑選取器 -->
@@ -90,7 +90,7 @@
           <p class="empty-hint">請選取專案進行掃描...</p>
         </div>
 
-        <!-- 測試指標說明移至專案選擇與架構概覽下方 -->
+        <!-- 測試指標說明 -->
         <div class="concept-explanation-card mt-3">
           <div class="concept-header">
             <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -130,7 +130,7 @@
         <div class="mode-tabs">
           <button class="mode-btn active" data-mode="diff-e2e">
             <div class="mode-info">
-              <strong>模式 A: Git Diff E2E</strong>
+              <strong>模式 A: E2E</strong>
               <small>暫存探針與變異測試</small>
             </div>
           </button>
@@ -147,224 +147,195 @@
             </div>
           </button>
         </div>
-      </aside>
+      </section>
 
-      <!-- 主要內容區 (全幅保留給測試流程與細節) -->
-      <section class="main-content">
-        
-        <!-- 合併：生成測案區塊與執行管線流程區塊 (左右分割佈局) -->
-        <div class="card unified-flow-card workflow-stage stage-generate">
-          <div class="workflow-stage-label"><span>01</span> 生成測案</div>
-          <div class="unified-flow-split">
-            <!-- 左欄：選擇要測試的 Skill 與生成測案按鈕 -->
-            <div class="flow-col-selector">
-              <!-- 模式 B 下顯示的 Skill 選擇器 (初始無預設值) -->
-              <div id="skillSelectorGroup" class="skill-selector-group">
-                <label class="control-label">選擇要測試的 Skill：</label>
-                <div class="autocomplete-wrapper">
-                  <div class="autocomplete-input-box">
-                    <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <circle cx="11" cy="11" r="8"/>
-                      <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                    </svg>
-                    <input type="text" id="skillSearchInput" class="autocomplete-input" placeholder="請選擇或搜尋 Skill..." autocomplete="off">
-                    <button type="button" id="clearSkillBtn" class="clear-skill-btn hidden" title="清除選取的 Skill">
-                      <svg class="clear-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
-                      </svg>
-                    </button>
-                    <button type="button" id="toggleDropdownBtn" class="dropdown-arrow-btn" title="切換選單">
-                      <svg class="arrow-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="6 9 12 15 18 9"/>
-                      </svg>
-                    </button>
-                  </div>
-                  <div id="autocompleteDropdown" class="autocomplete-dropdown hidden">
-                    <!-- 選項動態生成 -->
-                  </div>
-                </div>
-              </div>
+      <!-- 欄位 02：生成測案 (含置底執行按鈕) -->
+      <section class="dashboard-col col-02-generator" id="col02Generator">
+        <div class="col-stage-header">
+          <span class="col-step-tag">02</span>
+          <h3>生成測案</h3>
+        </div>
 
-              <!-- 模式 A / C 的狀態標題 -->
-              <div id="modeGenericHeader" class="generic-mode-header hidden">
-                <span id="genericModeTag" class="badge badge-accent">模式 A</span>
-                <span id="genericModeDesc" class="generic-desc">Git Diff 變異擊殺與全域防護</span>
-              </div>
-
-              <div class="selector-action-row mt-2">
-                <button id="btnGenerateFlow" class="btn btn-primary btn-block">
-                  <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="11" cy="11" r="8"/>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        <div class="col-generator-body">
+          <!-- 模式 B 下顯示的 Skill 選擇器 (初始無預設值) -->
+          <div id="skillSelectorGroup" class="skill-selector-group">
+            <label class="control-label">選擇要測試的 Skill：</label>
+            <div class="autocomplete-wrapper">
+              <div class="autocomplete-input-box">
+                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" id="skillSearchInput" class="autocomplete-input" placeholder="請選擇或搜尋 Skill..." autocomplete="off">
+                <button type="button" id="clearSkillBtn" class="clear-skill-btn hidden" title="清除選取的 Skill">
+                  <svg class="clear-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
                   </svg>
-                  <span>1. 生成測試流程與測案</span>
+                </button>
+                <button type="button" id="toggleDropdownBtn" class="dropdown-arrow-btn" title="切換選單">
+                  <svg class="arrow-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="6 9 12 15 18 9"/>
+                  </svg>
+                </button>
+              </div>
+              <div id="autocompleteDropdown" class="autocomplete-dropdown hidden"></div>
+            </div>
+          </div>
+
+          <!-- 模式 A / C 的狀態標題與來源切換 Tab -->
+          <div id="modeGenericHeader" class="generic-mode-header hidden">
+            <div class="generic-mode-title-row">
+              <div class="generic-header-left">
+                <span id="genericModeTag" class="badge badge-accent">E2E</span>
+              </div>
+              <div class="segmented-control" id="diffSegmentedControl" role="group" aria-label="E2E 來源模式">
+                <button type="button" class="segmented-btn active" id="btnScopeModeProject" data-scope-mode="project">
+                  <svg class="btn-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                    <line x1="8" y1="21" x2="16" y2="21"/>
+                    <line x1="12" y1="17" x2="12" y2="21"/>
+                  </svg>
+                  <span>專案檔案</span>
+                </button>
+                <button type="button" class="segmented-btn" id="btnScopeModeDiff" data-scope-mode="diff">
+                  <svg class="btn-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="6" y1="3" x2="6" y2="15"/>
+                    <circle cx="18" cy="6" r="3"/>
+                    <circle cx="6" cy="18" r="3"/>
+                    <path d="M18 9a9 9 0 0 1-9 9"/>
+                  </svg>
+                  <span>Git Diff</span>
                 </button>
               </div>
             </div>
+            <span id="genericModeDesc" class="generic-desc">Git Diff 變異擊殺與全域防護</span>
+          </div>
 
-            <!-- 右欄：執行管線流程 (Function Flow) -->
-            <div class="flow-col-pipeline">
-              <div class="flow-header-mini">
-                <div class="header-left">
-                  <svg class="card-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                    <line x1="3" y1="9" x2="21" y2="9"/>
-                    <line x1="9" y1="21" x2="9" y2="9"/>
+          <!-- 選擇檔案按鈕與摘要列 -->
+          <div id="diffScopeControlGroup" class="diff-scope-control-group mt-2">
+            <div class="diff-scope-action-bar">
+              <button type="button" class="btn btn-sm btn-outline btn-scope-custom" id="btnScopeModeCustom" data-scope-mode="custom">
+                <svg class="btn-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+                <span>選擇檔案</span>
+              </button>
+
+              <div id="diffScopeSummaryBar" class="diff-scope-summary-bar">
+                <span id="diffScopeSummaryText" class="diff-scope-summary-text">全部 0 個可測檔案</span>
+                <button type="button" id="btnOpenScopeModal" class="btn btn-xs btn-outline hidden" title="修改選取的路徑範圍" aria-label="修改檔案選取範圍">
+                  <svg class="btn-svg-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                   </svg>
-                  <span>執行管線流程 (Function Flow)</span>
-                </div>
-                <span id="flowStatusBadge" class="badge badge-neutral">尚未啟動</span>
-              </div>
-              <div id="functionFlowContainer" class="function-flow-track">
-                <!-- 步驟節點動態生成 -->
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 測案區塊與細節主從介面 (Master-Detail Layout) -->
-        <div id="casesSection" class="mt-4 hidden workflow-stage stage-review">
-          <div class="section-badge-header">
-            <span class="step-tag">STEP 02</span>
-            <h3>測案規劃與目的說明 (點選左側測案，右側顯示細節)</h3>
-            <span id="casesCountBadge" class="badge badge-accent ml-auto">4 個測案</span>
-          </div>
-
-          <!-- Master-Detail 左右分割容器 -->
-          <div class="master-detail-container mt-2">
-            <!-- 左側：測案由上往下排列 -->
-            <div class="case-master-column">
-              <div id="caseResultsToolbar" class="case-results-toolbar hidden">
-                <div id="caseResultStats" class="case-result-stats"></div>
-                <div class="case-result-controls">
-                  <input id="caseSearchInput" class="styled-input case-search-input" type="search" placeholder="搜尋 ID、檔案或變異..." aria-label="搜尋模式 A 測案">
-                  <select id="caseStatusFilter" class="styled-select case-status-filter" aria-label="依測案狀態篩選">
-                    <option value="all">全部狀態</option>
-                    <option value="PASS">已擊殺</option>
-                    <option value="FAIL">存活</option>
-                    <option value="INCONCLUSIVE">無效</option>
-                  </select>
-                </div>
-                <div class="case-pagination">
-                  <button id="casePrevPage" class="btn btn-icon btn-sm" type="button" title="上一頁" aria-label="上一頁">‹</button>
-                  <span id="casePageInfo">第 1 / 1 頁</span>
-                  <button id="caseNextPage" class="btn btn-icon btn-sm" type="button" title="下一頁" aria-label="下一頁">›</button>
-                </div>
-              </div>
-              <div id="caseMasterList" class="case-master-list">
-                <!-- 測案卡片垂直由上往下排列動態生成 -->
-              </div>
-            </div>
-
-            <!-- 右側：測案細節檢視 (Detail Inspector) -->
-            <div class="case-detail-column">
-              <div id="caseInspectorCard" class="inspector-card">
-                <div class="inspector-header">
-                  <div class="header-left">
-                    <svg class="card-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                      <polyline points="14 2 14 8 20 8"/>
-                      <line x1="16" y1="13" x2="8" y2="13"/>
-                      <line x1="16" y1="17" x2="8" y2="17"/>
-                      <polyline points="10 9 9 9 8 9"/>
-                    </svg>
-                    <h4 id="inspectorCaseTitle">測案詳細檢視</h4>
-                  </div>
-                  <span id="inspectorStatusBadge" class="badge badge-neutral">待執行</span>
-                </div>
-                <div class="inspector-body">
-                  <div class="detail-group">
-                    <label>檢測目標與目的 (Objective)：</label>
-                    <div id="inspectObjective" class="meta-callout-primary"></div>
-                  </div>
-
-                  <div class="inspector-grid mt-3">
-                    <!-- 左欄：輸入與信心解析 -->
-                    <div class="inspector-col">
-                      <div class="detail-group">
-                        <div class="detail-label-row">
-                          <label for="inspectInput">輸入刺激 (Query / Input) - 可自由編輯自訂：</label>
-                          <span id="caseCustomBadge" class="badge badge-accent hidden">已自訂修改</span>
-                        </div>
-                        <textarea id="inspectInput" class="code-textarea-sm" rows="3" placeholder="請輸入使用者測試提問或情境指令..."></textarea>
-                        <div class="input-action-bar mt-1">
-                          <small class="text-muted">修改後將即時同步至本測案，點擊執行即可進行深度客製測試</small>
-                          <button type="button" id="btnResetInput" class="link-btn hidden">還原預設</button>
-                        </div>
-                      </div>
-
-                      <div class="detail-group mt-2">
-                        <label>信心指數解析 (Confidence Breakdown)：</label>
-                        <div id="inspectConfidenceBox" class="meta-callout"></div>
-                      </div>
-
-                      <div class="detail-group mt-2">
-                        <label>個別測案 Token 消耗明細：</label>
-                        <div id="inspectTokenTable" class="token-breakdown-box"></div>
-                      </div>
-                    </div>
-
-                    <!-- 右欄：實際產出內容與品質評審 -->
-                    <div class="inspector-col">
-                      <div class="detail-group">
-                        <label>Agent 產出結果預覽 (Simulated Output)：</label>
-                        <pre id="inspectOutput" class="code-view-lg"></pre>
-                      </div>
-
-                      <div class="detail-group mt-2">
-                        <label>產出品質評審 (Quality Evaluation)：</label>
-                        <div id="inspectQualityBox" class="quality-score-box"></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 批准執行控制區：移至 casesSection 外，置中擺放 -->
-        <div id="actionTriggerSection" class="action-trigger-wrapper mt-4 hidden workflow-stage stage-execute">
-          <div class="action-trigger-box">
-            <div id="desktopAgentPromptPanel" class="desktop-agent-prompt hidden">
-              <div class="desktop-agent-prompt-header">
-                <div>
-                  <strong>Desktop Agent 啟動 Prompt</strong>
-                  <small>開始 Skill 實測前，先複製並貼到 Desktop Agent。</small>
-                </div>
-                <button id="btnCopyAgentPrompt" class="btn btn-sm btn-accent" type="button" title="複製 Desktop Agent Prompt">
-                  <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                  </svg>
-                  <span id="copyAgentPromptLabel">複製 Prompt</span>
+                  <span>編輯範圍</span>
                 </button>
               </div>
-              <textarea id="desktopAgentPromptText" class="desktop-agent-prompt-text" rows="12" readonly spellcheck="false"></textarea>
             </div>
-            <div class="trigger-desc">
-              <span class="step-tag">STEP 03</span>
-              <strong>已確認上述測案與檢核目的？</strong>
-              <small>點擊啟動實體測試，量測 Token 並比對產出品質。</small>
-            </div>
-            <button id="btnExecutePlan" class="btn btn-success btn-lg">
+          </div>
+
+          <div class="selector-action-row mt-3">
+            <button id="btnGenerateFlow" class="btn btn-primary btn-block">
               <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="5 3 19 12 5 21 5 3"/>
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
               </svg>
-              <span>3. 批准測案並開始實體執行</span>
+              <span>1. 生成測試流程與測案</span>
             </button>
           </div>
+
+          <!-- 執行管線流程 (Function Flow) 放在按鈕下，由上往下排列做說明 -->
+          <div class="flow-col-pipeline mt-3" id="flowColPipeline">
+            <div class="flow-header-mini">
+              <div class="header-left">
+                <svg class="card-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                  <line x1="3" y1="9" x2="21" y2="9"/>
+                  <line x1="9" y1="21" x2="9" y2="9"/>
+                </svg>
+                <span>執行管線流程 (Function Flow)</span>
+              </div>
+              <span id="flowStatusBadge" class="badge badge-neutral">尚未啟動</span>
+            </div>
+            <div id="functionFlowContainer" class="function-flow-track vertical-flow-track">
+              <!-- 步驟節點動態生成：由上往下排列 -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 欄位 03：測案規劃與目的說明 (純列表 + 置底執行按鈕) -->
+      <section class="dashboard-col col-03-cases" id="col03Cases">
+        <div class="col-stage-header">
+          <span class="col-step-tag">03</span>
+          <h3>測案規劃與目的說明</h3>
+          <span id="casesCountBadge" class="badge badge-accent ml-auto">0 個測案</span>
         </div>
 
-        <!-- 第二階段：整體評估結果與品質計分卡 (Step 2: Scorecard) -->
-        <div id="scorecardSection" class="mt-4 hidden workflow-stage stage-result">
-          <div class="section-badge-header">
-            <span class="step-tag step-tag-done">STEP 04</span>
-            <h3>實測總體評估與品質計分卡</h3>
-            <div id="overallScorePill" class="score-pill ml-auto">N/A INCONCLUSIVE</div>
+        <div id="casesSection" class="cases-section-container hidden">
+          <div id="caseResultsToolbar" class="case-results-toolbar hidden">
+            <div id="caseResultStats" class="case-result-stats"></div>
+            <div class="case-result-controls">
+              <input id="caseSearchInput" class="styled-input case-search-input" type="search" placeholder="搜尋 ID、檔案或變異..." aria-label="搜尋模式 A 測案">
+              <select id="caseStatusFilter" class="styled-select case-status-filter" aria-label="依測案狀態篩選">
+                <option value="all">全部狀態</option>
+                <option value="PASS">已擊殺</option>
+                <option value="FAIL">存活</option>
+                <option value="INCONCLUSIVE">無效</option>
+              </select>
+            </div>
+            <div class="case-pagination">
+              <button id="casePrevPage" class="btn btn-icon btn-sm" type="button" title="上一頁" aria-label="上一頁">‹</button>
+              <span id="casePageInfo">第 1 / 1 頁</span>
+              <button id="caseNextPage" class="btn btn-icon btn-sm" type="button" title="下一頁" aria-label="下一頁">›</button>
+            </div>
           </div>
+          <div id="caseMasterList" class="case-master-list mt-2">
+            <!-- 測案卡片垂直由上往下排列動態生成 -->
+          </div>
+        </div>
 
+        <!-- 執行按鈕置底於 03 欄位 (預設隱藏，生成測案後才顯示) -->
+        <div class="col-cases-footer col-generator-footer mt-auto hidden" id="actionTriggerSection">
+          <div id="desktopAgentPromptPanel" class="desktop-agent-prompt hidden">
+            <div class="desktop-agent-prompt-header">
+              <div>
+                <strong>Desktop Agent 啟動 Prompt</strong>
+                <small>開始 Skill 實測前，先複製並貼到 Desktop Agent。</small>
+              </div>
+              <button id="btnCopyAgentPrompt" class="btn btn-sm btn-accent" type="button" title="複製 Desktop Agent Prompt">
+                <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                <span id="copyAgentPromptLabel">複製 Prompt</span>
+              </button>
+            </div>
+            <textarea id="desktopAgentPromptText" class="desktop-agent-prompt-text" rows="12" readonly spellcheck="false"></textarea>
+          </div>
+          <div class="footer-action-desc">
+            <strong>已確認上述測案與檢核目的？</strong>
+            <small>點擊啟動實體測試，量測 Token 並比對產出品質。</small>
+          </div>
+          <button id="btnExecutePlan" class="btn btn-success btn-block" disabled>
+            <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            <span>批准測案並開始實體執行</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 欄位 04：實測總體評估與品質計分卡 -->
+      <section class="dashboard-col col-04-scorecard" id="col04Scorecard">
+        <div class="col-stage-header">
+          <span class="col-step-tag">04</span>
+          <h3>實測總體評估與品質計分卡</h3>
+          <div id="overallScorePill" class="score-pill ml-auto">N/A INCONCLUSIVE</div>
+        </div>
+
+        <div id="scorecardSection" class="scorecard-section-container hidden">
           <!-- 歷史存檔自動建檔確認橫幅 -->
           <div id="scorecardHistoryArchiveBanner" class="history-archive-banner hidden mt-2">
             <div class="archive-banner-info">
@@ -440,9 +411,80 @@
             </div>
           </div>
         </div>
-
       </section>
     </main>
+
+    <!-- 測案細節浮動視窗 (Floating Inspector Popover) -->
+    <div id="caseInspectorPopover" class="case-inspector-popover hidden" role="dialog" aria-modal="true" aria-labelledby="inspectorCaseTitle">
+      <div class="inspector-header">
+        <div class="header-left">
+          <svg class="card-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10 9 9 9 8 9"/>
+          </svg>
+          <h4 id="inspectorCaseTitle">測案詳細檢視</h4>
+        </div>
+        <div class="header-right">
+          <span id="inspectorStatusBadge" class="badge badge-neutral">待執行</span>
+          <button type="button" id="btnCloseInspectorPopover" class="btn btn-icon btn-sm popover-close-btn" title="關閉詳細檢視" aria-label="關閉">
+            <svg class="btn-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="inspector-body" id="caseInspectorCard">
+        <div class="detail-group">
+          <label>檢測目標與目的 (Objective)：</label>
+          <div id="inspectObjective" class="meta-callout-primary"></div>
+        </div>
+
+        <div class="inspector-grid mt-3">
+          <!-- 輸入與信心解析 -->
+          <div class="inspector-col">
+            <div class="detail-group">
+              <div class="detail-label-row">
+                <label for="inspectInput">輸入刺激 (Query / Input) - 可自由編輯自訂：</label>
+                <span id="caseCustomBadge" class="badge badge-accent hidden">已自訂修改</span>
+              </div>
+              <textarea id="inspectInput" class="code-textarea-sm" rows="3" placeholder="請輸入使用者測試提問或情境指令..."></textarea>
+              <div class="input-action-bar mt-1">
+                <small class="text-muted">修改後將即時同步至本測案，點擊執行即可進行深度客製測試</small>
+                <button type="button" id="btnResetInput" class="link-btn hidden">還原預設</button>
+              </div>
+            </div>
+
+            <div class="detail-group mt-2">
+              <label>信心指數解析 (Confidence Breakdown)：</label>
+              <div id="inspectConfidenceBox" class="meta-callout"></div>
+            </div>
+
+            <div class="detail-group mt-2">
+              <label>個別測案 Token 消耗明細：</label>
+              <div id="inspectTokenTable" class="token-breakdown-box"></div>
+            </div>
+          </div>
+
+          <!-- 實際產出內容與品質評審 -->
+          <div class="inspector-col">
+            <div class="detail-group">
+              <label>Agent 產出結果預覽 (Simulated Output)：</label>
+              <pre id="inspectOutput" class="code-view-lg"></pre>
+            </div>
+
+            <div class="detail-group mt-2">
+              <label>產出品質評審 (Quality Evaluation)：</label>
+              <div id="inspectQualityBox" class="quality-score-box"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="caseInspectorBackdrop" class="case-inspector-backdrop hidden"></div>
   <!-- 獨立畫面：歷史紀錄與基準回溯中心 (獨立切換專案、模式與檔案) -->
   <main class="history-view-container hidden" id="historyView">
     <!-- 頂部多維度篩選工具列 -->
@@ -583,6 +625,72 @@
       </div>
     </div>
   </main>
+
+  <!-- 模式 A 路徑範圍選擇 Modal (Accessible Dialog & Focus Trap) -->
+  <div id="scopeModalOverlay" class="modal-overlay hidden" role="presentation">
+    <div id="scopeModalDialog" class="modal-dialog scope-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="scopeModalTitle">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <h3 id="scopeModalTitle" class="modal-title">選擇專案測試範圍</h3>
+          <span id="modalSelectedCountBadge" class="badge badge-neutral">已選 0 / 0 個檔案</span>
+        </div>
+        <button type="button" id="btnCloseScopeModal" class="modal-close-btn" aria-label="關閉視窗">
+          <svg class="close-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="scope-modal-toolbar">
+          <div class="scope-modal-toolbar-left">
+            <span class="scope-modal-hint">勾選欲納入本次測試的原始碼檔案：</span>
+            <label class="scope-filter-toggle" title="隱藏不需 E2E 測試的目錄 (.github, .claude, env 等)">
+              <input type="checkbox" id="chkHideNonE2E" checked>
+              <span>隱藏非測試項目 (.github / .claude / env...)</span>
+            </label>
+          </div>
+          <div class="scope-modal-actions">
+            <button type="button" id="btnModalSelectAll" class="btn btn-xs btn-outline">全選</button>
+            <button type="button" id="btnModalClear" class="btn btn-xs btn-outline">清除</button>
+          </div>
+        </div>
+
+        <!-- 檔案樹容器 (動態渲染) -->
+        <div id="modalDiffTreeContainer" class="modal-tree-container">
+          <p class="empty-hint">載入中...</p>
+        </div>
+
+        <!-- 折疊式「進階篩選」Glob 輸入區 -->
+        <div class="modal-glob-accordion mt-3">
+          <button type="button" id="btnToggleGlobAccordion" class="accordion-toggle-btn" aria-expanded="false" aria-controls="modalGlobContent">
+            <svg class="chevron-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+            <span>進階篩選 (Glob 規則)</span>
+          </button>
+          <div id="modalGlobContent" class="accordion-content hidden">
+            <small class="diff-glob-hint mb-1">每行一個 pattern，<code>!pattern</code> 表示排除</small>
+            <textarea id="modalGlobInput" class="styled-textarea diff-glob-textarea" rows="3" placeholder="例：&#10;src/**/*.js&#10;!**/*.spec.js"></textarea>
+          </div>
+        </div>
+
+        <!-- 錯誤提示訊息 (例如 0 個檔案) -->
+        <div id="modalScopeAlert" class="alert-box alert-error mt-2 hidden" role="alert">
+          <span id="modalScopeAlertText">請至少選取一個變更檔案或符合條件的 pattern。</span>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" id="btnCancelScopeModal" class="btn btn-outline">取消</button>
+        <button type="button" id="btnApplyScopeModal" class="btn btn-primary">套用選取</button>
+      </div>
+    </div>
+  </div>
 
   <script src="js/app.js"></script>
 </body>

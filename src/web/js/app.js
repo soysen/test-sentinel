@@ -30,6 +30,18 @@ const state = {
     target: 'all',
     allRecords: [],
     selectedRecordId: null
+  },
+  // 模式 A 路徑範圍選測狀態
+  diffPathScope: {
+    sourceMode: 'project', // 'project' (專案檔案) | 'diff' (Git Diff)
+    isCustom: false, // true 時表示勾選自訂範圍
+    rawFiles: [],
+    appliedSelectedPaths: new Set(),
+    appliedGlobText: '',
+    draftSelectedPaths: new Set(),
+    draftGlobText: '',
+    hideNonE2E: true, // 預設隱藏非 E2E 測試目錄與檔案 (.github, .claude, env...)
+    lastLoadRequestId: 0
   }
 };
 
@@ -61,6 +73,33 @@ const clearSkillBtn = document.getElementById('clearSkillBtn');
 const toggleDropdownBtn = document.getElementById('toggleDropdownBtn');
 const autocompleteDropdown = document.getElementById('autocompleteDropdown');
 const btnGenerateFlow = document.getElementById('btnGenerateFlow');
+
+// 模式 A 路徑範圍選測節點
+const diffScopeControlGroup = document.getElementById('diffScopeControlGroup');
+const diffSegmentedControl = document.getElementById('diffSegmentedControl');
+const btnScopeModeProject = document.getElementById('btnScopeModeProject');
+const btnScopeModeDiff = document.getElementById('btnScopeModeDiff');
+const btnScopeModeCustom = document.getElementById('btnScopeModeCustom');
+const diffScopeSummaryBar = document.getElementById('diffScopeSummaryBar');
+const diffScopeSummaryText = document.getElementById('diffScopeSummaryText');
+const btnOpenScopeModal = document.getElementById('btnOpenScopeModal');
+
+// 模式 A Scope Modal 節點
+const scopeModalOverlay = document.getElementById('scopeModalOverlay');
+const scopeModalDialog = document.getElementById('scopeModalDialog');
+const btnCloseScopeModal = document.getElementById('btnCloseScopeModal');
+const modalSelectedCountBadge = document.getElementById('modalSelectedCountBadge');
+const chkHideNonE2E = document.getElementById('chkHideNonE2E');
+const btnModalSelectAll = document.getElementById('btnModalSelectAll');
+const btnModalClear = document.getElementById('btnModalClear');
+const modalDiffTreeContainer = document.getElementById('modalDiffTreeContainer');
+const btnToggleGlobAccordion = document.getElementById('btnToggleGlobAccordion');
+const modalGlobContent = document.getElementById('modalGlobContent');
+const modalGlobInput = document.getElementById('modalGlobInput');
+const modalScopeAlert = document.getElementById('modalScopeAlert');
+const modalScopeAlertText = document.getElementById('modalScopeAlertText');
+const btnCancelScopeModal = document.getElementById('btnCancelScopeModal');
+const btnApplyScopeModal = document.getElementById('btnApplyScopeModal');
 
 // 歷史存檔確認橫幅
 const scorecardHistoryArchiveBanner = document.getElementById('scorecardHistoryArchiveBanner');
@@ -97,6 +136,7 @@ const toggleConceptBtn = document.getElementById('toggleConceptBtn');
 const conceptBody = document.getElementById('conceptBody');
 
 // 流程與測案區
+const flowColPipeline = document.getElementById('flowColPipeline');
 const flowStatusBadge = document.getElementById('flowStatusBadge');
 const functionFlowContainer = document.getElementById('functionFlowContainer');
 const casesSection = document.getElementById('casesSection');
@@ -116,7 +156,10 @@ const desktopAgentPromptText = document.getElementById('desktopAgentPromptText')
 const btnCopyAgentPrompt = document.getElementById('btnCopyAgentPrompt');
 const copyAgentPromptLabel = document.getElementById('copyAgentPromptLabel');
 
-// 測案詳細檢視器 (Inspector)
+// 測案詳細檢視器 (Inspector Popover)
+const caseInspectorPopover = document.getElementById('caseInspectorPopover');
+const btnCloseInspectorPopover = document.getElementById('btnCloseInspectorPopover');
+const caseInspectorBackdrop = document.getElementById('caseInspectorBackdrop');
 const caseInspectorCard = document.getElementById('caseInspectorCard');
 const inspectorCaseTitle = document.getElementById('inspectorCaseTitle');
 const inspectorStatusBadge = document.getElementById('inspectorStatusBadge');
@@ -261,6 +304,39 @@ function bindEvents() {
     });
   });
 
+  // 模式 A 路徑範圍控制項與 Modal 事件
+  btnScopeModeProject?.addEventListener('click', () => setScopeMode('project'));
+  btnScopeModeDiff?.addEventListener('click', () => setScopeMode('diff'));
+  btnScopeModeCustom?.addEventListener('click', () => setScopeMode('custom'));
+  btnOpenScopeModal?.addEventListener('click', openScopeModal);
+
+  btnCloseScopeModal?.addEventListener('click', cancelScopeModal);
+  btnCancelScopeModal?.addEventListener('click', cancelScopeModal);
+  btnApplyScopeModal?.addEventListener('click', applyScopeModal);
+  btnModalSelectAll?.addEventListener('click', selectAllModalPaths);
+  btnModalClear?.addEventListener('click', clearAllModalPaths);
+
+  if (chkHideNonE2E) {
+    chkHideNonE2E.checked = state.diffPathScope.hideNonE2E;
+    chkHideNonE2E.addEventListener('change', () => {
+      state.diffPathScope.hideNonE2E = chkHideNonE2E.checked;
+      renderModalDiffTree();
+      updateModalDraftBadge();
+    });
+  }
+
+  scopeModalOverlay?.addEventListener('click', e => {
+    if (e.target === scopeModalOverlay) {
+      cancelScopeModal();
+    }
+  });
+
+  btnToggleGlobAccordion?.addEventListener('click', () => {
+    const isExpanded = btnToggleGlobAccordion.getAttribute('aria-expanded') === 'true';
+    btnToggleGlobAccordion.setAttribute('aria-expanded', !isExpanded);
+    modalGlobContent?.classList.toggle('hidden', isExpanded);
+  });
+
   // 概念說明展開/收合
   toggleConceptBtn.addEventListener('click', () => {
     const isHidden = conceptBody.classList.toggle('hidden');
@@ -331,6 +407,32 @@ function bindEvents() {
 
     updateCustomInputStatus(activeCase);
   });
+
+  // 關閉浮動測案檢視視窗
+  if (btnCloseInspectorPopover) {
+    btnCloseInspectorPopover.addEventListener('click', () => {
+      closeCaseInspector();
+    });
+  }
+
+  if (caseInspectorBackdrop) {
+    caseInspectorBackdrop.addEventListener('click', () => {
+      closeCaseInspector();
+    });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && caseInspectorPopover && !caseInspectorPopover.classList.contains('hidden')) {
+      closeCaseInspector();
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!caseInspectorPopover || caseInspectorPopover.classList.contains('hidden')) return;
+    if (caseInspectorPopover.contains(e.target)) return;
+    if (e.target.closest && e.target.closest('.case-item-card')) return;
+    closeCaseInspector();
+  });
 }
 
 function updateCustomInputStatus(activeCase) {
@@ -377,7 +479,7 @@ function updateModeView({ clearCases = false } = {}) {
 
   if (!isSkillMode) {
     if (state.activeMode === 'diff-e2e') {
-      genericModeTag.textContent = '模式 A: Git Diff E2E';
+      genericModeTag.textContent = 'E2E';
       genericModeDesc.textContent = '針對代碼修改局部合成暫存探針並執行變異擊殺測試';
     } else {
       genericModeTag.textContent = '模式 C: Harness 健檢';
@@ -385,9 +487,20 @@ function updateModeView({ clearCases = false } = {}) {
     }
   }
 
+  const isDiffMode = state.activeMode === 'diff-e2e';
+  diffSegmentedControl?.classList.toggle('hidden', !isDiffMode);
+  if (diffScopeControlGroup) {
+    diffScopeControlGroup.classList.toggle('hidden', !isDiffMode);
+    if (isDiffMode && state.currentProject && state.diffPathScope.rawFiles.length === 0) {
+      loadScopeFiles(state.currentProject);
+    }
+  }
+
   // 重設執行狀態
   casesSection.classList.add('hidden');
-  actionTriggerSection.classList.add('hidden');
+  if (actionTriggerSection) actionTriggerSection.classList.add('hidden');
+  if (btnExecutePlan) btnExecutePlan.disabled = true;
+  closeCaseInspector();
   scorecardSection.classList.add('hidden');
   flowStatusBadge.textContent = '尚未啟動';
   flowStatusBadge.className = 'badge badge-neutral';
@@ -450,6 +563,608 @@ async function copyRemediationPrompt() {
   setTimeout(() => {
     copyRemediationPromptLabel.textContent = '複製 AI 修正 Prompt';
   }, 1800);
+}
+
+// 模式 A: 路徑範圍選測 (Path Scoped Selection) 輔助邏輯
+function invalidateScopePreview() {
+  if (state.activeMode !== 'diff-e2e') return;
+  if (state.currentCases.length > 0 || !casesSection.classList.contains('hidden')) {
+    clearCaseResults();
+    casesSection.classList.add('hidden');
+    if (actionTriggerSection) actionTriggerSection.classList.add('hidden');
+    if (btnExecutePlan) btnExecutePlan.disabled = true;
+    closeCaseInspector();
+    scorecardSection.classList.add('hidden');
+    flowStatusBadge.textContent = '範圍已變更，請重新生成測案';
+    flowStatusBadge.className = 'badge badge-warning';
+  }
+}
+
+function createSvgIcon(type) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.classList.add('tree-icon');
+
+  if (type === 'chevron') {
+    svg.classList.add('tree-chevron');
+    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    polyline.setAttribute('points', '9 18 15 12 9 6');
+    svg.appendChild(polyline);
+  } else if (type === 'folder') {
+    svg.classList.add('tree-folder');
+    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pathEl.setAttribute('d', 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z');
+    svg.appendChild(pathEl);
+  } else if (type === 'folder-open') {
+    svg.classList.add('tree-folder-open');
+    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pathEl.setAttribute('d', 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z');
+    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    polyline.setAttribute('points', '2 10 22 10');
+    svg.appendChild(pathEl);
+    svg.appendChild(polyline);
+  } else if (type === 'file') {
+    svg.classList.add('tree-file');
+    const pathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    pathEl.setAttribute('d', 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z');
+    const poly1 = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    poly1.setAttribute('points', '14 2 14 8 20 8');
+    const poly2 = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    poly2.setAttribute('points', '10 13 8 15 10 17');
+    const poly3 = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    poly3.setAttribute('points', '14 13 16 15 14 17');
+    svg.appendChild(pathEl);
+    svg.appendChild(poly1);
+    svg.appendChild(poly2);
+    svg.appendChild(poly3);
+  }
+
+  return svg;
+}
+
+function updateSegmentedControlUI() {
+  const isCustom = state.diffPathScope.isCustom;
+  const sourceMode = state.diffPathScope.sourceMode;
+  btnScopeModeProject?.classList.toggle('active', !isCustom && sourceMode === 'project');
+  btnScopeModeDiff?.classList.toggle('active', !isCustom && sourceMode === 'diff');
+  btnScopeModeCustom?.classList.toggle('active', isCustom);
+}
+
+function updateSummaryBarUI() {
+  if (!diffScopeSummaryText) return;
+  const total = state.diffPathScope.rawFiles.length;
+  if (!state.diffPathScope.isCustom) {
+    if (state.diffPathScope.sourceMode === 'project') {
+      diffScopeSummaryText.textContent = `全部 ${total} 個可測檔案`;
+    } else {
+      diffScopeSummaryText.textContent = `全部 ${total} 個變更檔案`;
+    }
+    btnOpenScopeModal?.classList.add('hidden');
+  } else {
+    const selected = state.diffPathScope.appliedSelectedPaths.size;
+    diffScopeSummaryText.textContent = `已選 ${selected} / ${total} 個檔案`;
+    btnOpenScopeModal?.classList.remove('hidden');
+  }
+}
+
+async function setScopeMode(newMode) {
+  if (newMode === 'project') {
+    const changed = state.diffPathScope.sourceMode !== 'project' || state.diffPathScope.isCustom;
+    state.diffPathScope.sourceMode = 'project';
+    state.diffPathScope.isCustom = false;
+    state.diffPathScope.appliedGlobText = '';
+    if (state.currentProject) {
+      await loadScopeFiles(state.currentProject, 'project');
+    }
+    state.diffPathScope.appliedSelectedPaths = new Set(state.diffPathScope.rawFiles.map(f => f.filePath));
+    updateSegmentedControlUI();
+    updateSummaryBarUI();
+    if (changed) {
+      invalidateScopePreview();
+    }
+  } else if (newMode === 'diff') {
+    const changed = state.diffPathScope.sourceMode !== 'diff' || state.diffPathScope.isCustom;
+    state.diffPathScope.sourceMode = 'diff';
+    state.diffPathScope.isCustom = false;
+    state.diffPathScope.appliedGlobText = '';
+    if (state.currentProject) {
+      await loadScopeFiles(state.currentProject, 'diff');
+    }
+    state.diffPathScope.appliedSelectedPaths = new Set(state.diffPathScope.rawFiles.map(f => f.filePath));
+    updateSegmentedControlUI();
+    updateSummaryBarUI();
+    if (changed) {
+      invalidateScopePreview();
+    }
+  } else if (newMode === 'custom') {
+    openScopeModal();
+  }
+}
+
+let previouslyFocusedElement = null;
+
+function trapFocusInModal(e) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    cancelScopeModal();
+    return;
+  }
+  if (e.key === 'Tab') {
+    if (!scopeModalDialog) return;
+    const focusable = Array.from(scopeModalDialog.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )).filter(el => !el.disabled && el.offsetParent !== null);
+
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }
+}
+
+function openScopeModal() {
+  if (!scopeModalOverlay) return;
+  previouslyFocusedElement = document.activeElement;
+
+  state.diffPathScope.draftSelectedPaths = new Set(state.diffPathScope.appliedSelectedPaths);
+  state.diffPathScope.draftGlobText = state.diffPathScope.appliedGlobText;
+  if (modalGlobInput) {
+    modalGlobInput.value = state.diffPathScope.draftGlobText;
+  }
+  if (chkHideNonE2E) {
+    chkHideNonE2E.checked = state.diffPathScope.hideNonE2E;
+  }
+
+  renderModalDiffTree();
+  updateModalDraftBadge();
+
+  scopeModalOverlay.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  document.addEventListener('keydown', trapFocusInModal);
+
+  requestAnimationFrame(() => {
+    btnCloseScopeModal?.focus();
+  });
+}
+
+function closeScopeModal() {
+  if (!scopeModalOverlay) return;
+  scopeModalOverlay.classList.add('hidden');
+  document.body.classList.remove('modal-open');
+  document.removeEventListener('keydown', trapFocusInModal);
+  if (previouslyFocusedElement && typeof previouslyFocusedElement.focus === 'function') {
+    previouslyFocusedElement.focus();
+  }
+}
+
+function cancelScopeModal() {
+  updateSegmentedControlUI();
+  updateSummaryBarUI();
+  closeScopeModal();
+}
+
+const NON_E2E_DIR_PARTS = new Set([
+  '.github',
+  '.claude',
+  '.gemini',
+  '.cursor',
+  '.vscode',
+  'env',
+  'venv',
+  '.venv',
+  '.idea',
+  '.husky'
+]);
+
+function isNonE2EPath(filePath) {
+  if (!filePath) return false;
+  const parts = filePath.split('/');
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (NON_E2E_DIR_PARTS.has(part)) return true;
+    if (i === parts.length - 1 && (part.startsWith('.env') || part === '.gitignore' || part === '.npmrc')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getVisibleModalFiles() {
+  const files = state.diffPathScope.rawFiles || [];
+  if (!state.diffPathScope.hideNonE2E) return files;
+  return files.filter(f => !isNonE2EPath(f.filePath));
+}
+
+function applyScopeModal() {
+  const visibleFiles = getVisibleModalFiles();
+  const selectedCount = visibleFiles.filter(f => state.diffPathScope.draftSelectedPaths.has(f.filePath)).length;
+  if (selectedCount === 0) {
+    if (modalScopeAlert) {
+      modalScopeAlert.classList.remove('hidden');
+      modalScopeAlertText.textContent = '請至少選取一個檔案或符合條件的 pattern。';
+    }
+    return;
+  }
+
+  state.diffPathScope.appliedSelectedPaths = new Set(
+    Array.from(state.diffPathScope.draftSelectedPaths).filter(p => !state.diffPathScope.hideNonE2E || !isNonE2EPath(p))
+  );
+  state.diffPathScope.appliedGlobText = (modalGlobInput?.value || '').trim();
+  state.diffPathScope.isCustom = true;
+
+  updateSegmentedControlUI();
+  updateSummaryBarUI();
+  closeScopeModal();
+  invalidateScopePreview();
+}
+
+function renderModalDiffTree() {
+  if (!modalDiffTreeContainer) return;
+  modalDiffTreeContainer.replaceChildren();
+
+  const files = getVisibleModalFiles();
+  if (!files || files.length === 0) {
+    const hint = document.createElement('p');
+    hint.className = 'empty-hint';
+    hint.textContent = state.diffPathScope.sourceMode === 'project'
+      ? '專案中無任何可測試的原始碼檔案'
+      : '本次無任何 Git 變更檔案';
+    modalDiffTreeContainer.appendChild(hint);
+    updateModalDraftBadge();
+    return;
+  }
+
+  const root = { name: '', path: '', isDir: true, children: {} };
+
+  for (const file of files) {
+    const parts = file.filePath.split('/');
+    let curr = root;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isFile = i === parts.length - 1;
+      const subPath = parts.slice(0, i + 1).join('/');
+
+      if (isFile) {
+        curr.children[part] = {
+          name: part,
+          path: subPath,
+          isDir: false,
+          fileData: file
+        };
+      } else {
+        if (!curr.children[part]) {
+          curr.children[part] = {
+            name: part,
+            path: subPath,
+            isDir: true,
+            children: {}
+          };
+        }
+        curr = curr.children[part];
+      }
+    }
+  }
+
+  const fragment = document.createDocumentFragment();
+  let folderCounter = 0;
+
+  function createTreeNodeElement(node) {
+    const nodeEl = document.createElement('div');
+    nodeEl.className = `diff-tree-node ${node.isDir ? 'diff-tree-folder' : 'diff-tree-file'}`;
+    nodeEl.dataset.path = node.path;
+
+    const rowEl = document.createElement('div');
+    rowEl.className = 'diff-tree-row';
+
+    if (node.isDir) {
+      folderCounter++;
+      const folderId = `tree-folder-${folderCounter}`;
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'diff-tree-toggle-btn';
+      toggleBtn.setAttribute('aria-expanded', 'false');
+      toggleBtn.setAttribute('aria-controls', folderId);
+      toggleBtn.setAttribute('aria-label', `展開或收合資料夾 ${node.name}`);
+
+      const chevron = createSvgIcon('chevron');
+      chevron.style.transform = 'rotate(0deg)';
+      toggleBtn.appendChild(chevron);
+      rowEl.appendChild(toggleBtn);
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'diff-tree-checkbox folder-checkbox';
+      checkbox.dataset.path = node.path;
+      rowEl.appendChild(checkbox);
+
+      const folderIcon = createSvgIcon('folder');
+
+      const label = document.createElement('span');
+      label.className = 'diff-tree-label';
+      label.appendChild(folderIcon);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'diff-tree-filename';
+      nameSpan.textContent = node.name;
+      label.appendChild(nameSpan);
+
+      rowEl.appendChild(label);
+      nodeEl.appendChild(rowEl);
+
+      const childrenContainer = document.createElement('div');
+      childrenContainer.id = folderId;
+      childrenContainer.className = 'diff-tree-children';
+      childrenContainer.style.display = 'none';
+
+      const childKeys = Object.keys(node.children).sort((a, b) => {
+        const nodeA = node.children[a];
+        const nodeB = node.children[b];
+        if (nodeA.isDir !== nodeB.isDir) return nodeA.isDir ? -1 : 1;
+        return a.localeCompare(b);
+      });
+
+      for (const k of childKeys) {
+        childrenContainer.appendChild(createTreeNodeElement(node.children[k]));
+      }
+
+      nodeEl.appendChild(childrenContainer);
+
+      let isExpanded = false;
+      const toggleExpand = () => {
+        isExpanded = !isExpanded;
+        toggleBtn.setAttribute('aria-expanded', String(isExpanded));
+        childrenContainer.style.display = isExpanded ? 'flex' : 'none';
+        chevron.style.transform = isExpanded ? 'rotate(90deg)' : 'rotate(0deg)';
+        const newFolderIcon = createSvgIcon(isExpanded ? 'folder-open' : 'folder');
+        label.replaceChild(newFolderIcon, label.firstChild);
+      };
+
+      toggleBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        toggleExpand();
+      });
+
+      toggleBtn.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleExpand();
+        }
+      });
+
+      checkbox.addEventListener('change', () => {
+        const isChecked = checkbox.checked;
+        checkbox.indeterminate = false;
+        const descendantCheckboxes = nodeEl.querySelectorAll('.diff-tree-checkbox');
+        descendantCheckboxes.forEach(cb => {
+          cb.checked = isChecked;
+          cb.indeterminate = false;
+          if (!cb.classList.contains('folder-checkbox')) {
+            if (isChecked) {
+              state.diffPathScope.draftSelectedPaths.add(cb.dataset.path);
+            } else {
+              state.diffPathScope.draftSelectedPaths.delete(cb.dataset.path);
+            }
+          }
+        });
+        updateModalParentFolderStates();
+        updateModalDraftBadge();
+      });
+    } else {
+      const spacer = document.createElement('span');
+      spacer.className = 'diff-tree-toggle';
+      rowEl.appendChild(spacer);
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'diff-tree-checkbox file-checkbox';
+      checkbox.dataset.path = node.path;
+      checkbox.checked = state.diffPathScope.draftSelectedPaths.has(node.path);
+      rowEl.appendChild(checkbox);
+
+      const fileIcon = createSvgIcon('file');
+
+      const label = document.createElement('span');
+      label.className = 'diff-tree-label';
+      label.title = node.path;
+      label.appendChild(fileIcon);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'diff-tree-filename';
+      nameSpan.textContent = node.name;
+      label.appendChild(nameSpan);
+
+      if (node.fileData) {
+        if (node.fileData.addedCount > 0) {
+          const addedBadge = document.createElement('span');
+          addedBadge.className = 'diff-tree-badge diff-badge-added';
+          addedBadge.textContent = `+${node.fileData.addedCount}`;
+          label.appendChild(addedBadge);
+        }
+        if (node.fileData.removedCount > 0) {
+          const removedBadge = document.createElement('span');
+          removedBadge.className = 'diff-tree-badge diff-badge-removed';
+          removedBadge.textContent = `-${node.fileData.removedCount}`;
+          label.appendChild(removedBadge);
+        }
+      }
+      rowEl.appendChild(label);
+      nodeEl.appendChild(rowEl);
+
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          state.diffPathScope.draftSelectedPaths.add(node.path);
+        } else {
+          state.diffPathScope.draftSelectedPaths.delete(node.path);
+        }
+        updateModalParentFolderStates();
+        updateModalDraftBadge();
+      });
+    }
+
+    return nodeEl;
+  }
+
+  const rootKeys = Object.keys(root.children).sort((a, b) => {
+    const nodeA = root.children[a];
+    const nodeB = root.children[b];
+    if (nodeA.isDir !== nodeB.isDir) return nodeA.isDir ? -1 : 1;
+    return a.localeCompare(b);
+  });
+
+  for (const k of rootKeys) {
+    fragment.appendChild(createTreeNodeElement(root.children[k]));
+  }
+
+  modalDiffTreeContainer.appendChild(fragment);
+  updateModalParentFolderStates();
+}
+
+function updateModalParentFolderStates() {
+  if (!modalDiffTreeContainer) return;
+  const folderNodes = Array.from(modalDiffTreeContainer.querySelectorAll('.diff-tree-folder'));
+  folderNodes.sort((a, b) => (b.dataset.path?.length || 0) - (a.dataset.path?.length || 0));
+
+  for (const folder of folderNodes) {
+    const folderCheckbox = folder.querySelector(':scope > .diff-tree-row > .folder-checkbox');
+    if (!folderCheckbox) continue;
+    const childrenContainer = folder.querySelector(':scope > .diff-tree-children');
+    if (!childrenContainer) continue;
+
+    const childCheckboxes = Array.from(childrenContainer.querySelectorAll(':scope > .diff-tree-node > .diff-tree-row > .diff-tree-checkbox'));
+    if (childCheckboxes.length === 0) continue;
+
+    const allChecked = childCheckboxes.every(cb => cb.checked && !cb.indeterminate);
+    const allUnchecked = childCheckboxes.every(cb => !cb.checked && !cb.indeterminate);
+
+    if (allChecked) {
+      folderCheckbox.checked = true;
+      folderCheckbox.indeterminate = false;
+    } else if (allUnchecked) {
+      folderCheckbox.checked = false;
+      folderCheckbox.indeterminate = false;
+    } else {
+      folderCheckbox.checked = false;
+      folderCheckbox.indeterminate = true;
+    }
+  }
+}
+
+function updateModalDraftBadge() {
+  const visibleFiles = getVisibleModalFiles();
+  const total = visibleFiles.length;
+  const selected = visibleFiles.filter(f => state.diffPathScope.draftSelectedPaths.has(f.filePath)).length;
+  if (modalSelectedCountBadge) {
+    modalSelectedCountBadge.textContent = `已選 ${selected} / ${total} 個檔案`;
+    modalSelectedCountBadge.className = selected > 0 ? 'badge badge-accent' : 'badge badge-neutral';
+  }
+  if (btnApplyScopeModal) {
+    btnApplyScopeModal.disabled = selected === 0;
+  }
+  if (modalScopeAlert) {
+    modalScopeAlert.classList.toggle('hidden', selected > 0);
+  }
+}
+
+function selectAllModalPaths() {
+  if (!modalDiffTreeContainer) return;
+  const visibleFiles = getVisibleModalFiles();
+  visibleFiles.forEach(f => state.diffPathScope.draftSelectedPaths.add(f.filePath));
+  const checkboxes = modalDiffTreeContainer.querySelectorAll('.diff-tree-checkbox');
+  checkboxes.forEach(cb => {
+    cb.checked = true;
+    cb.indeterminate = false;
+  });
+  updateModalDraftBadge();
+}
+
+function clearAllModalPaths() {
+  if (!modalDiffTreeContainer) return;
+  const visibleFiles = getVisibleModalFiles();
+  visibleFiles.forEach(f => state.diffPathScope.draftSelectedPaths.delete(f.filePath));
+  const checkboxes = modalDiffTreeContainer.querySelectorAll('.diff-tree-checkbox');
+  checkboxes.forEach(cb => {
+    cb.checked = false;
+    cb.indeterminate = false;
+  });
+  updateModalDraftBadge();
+}
+
+async function loadScopeFiles(projectPath, requestedSourceMode = null) {
+  if (!projectPath) return;
+  const sourceMode = requestedSourceMode || state.diffPathScope.sourceMode;
+  const reqId = ++state.diffPathScope.lastLoadRequestId;
+
+  try {
+    const endpoint = sourceMode === 'project' ? '/api/inspect/project-files' : '/api/inspect/diff';
+    const bodyPayload = sourceMode === 'project'
+      ? { projectPath }
+      : { projectPath, scope: 'all' };
+
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyPayload)
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (reqId !== state.diffPathScope.lastLoadRequestId || state.currentProject !== projectPath) return;
+
+    state.diffPathScope.rawFiles = data.files || [];
+    state.diffPathScope.appliedSelectedPaths = new Set(state.diffPathScope.rawFiles.map(f => f.filePath));
+    state.diffPathScope.appliedGlobText = '';
+
+    updateSegmentedControlUI();
+    updateSummaryBarUI();
+  } catch (err) {
+    if (reqId !== state.diffPathScope.lastLoadRequestId || state.currentProject !== projectPath) return;
+    if (diffScopeSummaryText) {
+      diffScopeSummaryText.textContent = `無法載入檔案: ${err.message}`;
+    }
+  }
+}
+
+function getModeAPathScopePayload() {
+  if (state.activeMode !== 'diff-e2e') return null;
+  if (!state.diffPathScope.isCustom) return null;
+
+  const selectedFiles = Array.from(state.diffPathScope.appliedSelectedPaths);
+  const globText = (state.diffPathScope.appliedGlobText || '').trim();
+
+  const includePatterns = [];
+  const excludePatterns = [];
+  if (globText) {
+    const lines = globText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (line.startsWith('!')) {
+        excludePatterns.push(line.slice(1).trim());
+      } else {
+        includePatterns.push(line);
+      }
+    }
+  }
+
+  return {
+    selectedPaths: selectedFiles,
+    includePatterns,
+    excludePatterns
+  };
 }
 
 function getCurrentTargetName() {
@@ -800,13 +1515,13 @@ function renderInitialFunctionFlow() {
 function renderFlowTrack(steps, completedUpTo = 0) {
   functionFlowContainer.innerHTML = steps.map((s, idx) => `
     <div class="flow-step-node ${idx < completedUpTo ? 'completed' : idx === completedUpTo ? 'active' : ''}">
-      <div class="flow-node-index">${idx < completedUpTo ? '✓' : s.step}</div>
-      <div class="flow-node-text">
-        <strong>${s.name}</strong>
-        <small>${s.desc}</small>
+      <div class="flow-node-header">
+        <div class="flow-node-index">${idx < completedUpTo ? '✓' : s.step}</div>
+        <strong class="flow-node-title">${s.name}</strong>
       </div>
+      <div class="flow-node-desc">${s.desc}</div>
     </div>
-    ${idx < steps.length - 1 ? '<div class="flow-arrow">&rarr;</div>' : ''}
+    ${idx < steps.length - 1 ? '<div class="flow-arrow">&darr;</div>' : ''}
   `).join('');
 }
 
@@ -943,6 +1658,11 @@ async function selectProject(projPath) {
     updateModeAvailability(profile);
     renderAutocompleteOptions('');
     updateNavHistoryBadge();
+    if (state.activeMode === 'diff-e2e') {
+      state.diffPathScope.isCustom = false;
+      state.diffPathScope.appliedGlobText = '';
+      loadScopeFiles(state.currentProject);
+    }
   } catch (e) {
     if (state.currentProject !== targetPath) return;
     projectInfo.innerHTML = `<p class="text-warning">掃描失敗: ${e.message}</p>`;
@@ -998,6 +1718,8 @@ function clearSkillSelection() {
   // 重設下層預覽
   if (casesSection) casesSection.classList.add('hidden');
   if (actionTriggerSection) actionTriggerSection.classList.add('hidden');
+  if (btnExecutePlan) btnExecutePlan.disabled = true;
+  closeCaseInspector();
   if (scorecardSection) scorecardSection.classList.add('hidden');
 
   updateNavHistoryBadge();
@@ -1069,7 +1791,9 @@ function selectSingleSkill(skill) {
 
   // 重設下層預覽
   casesSection.classList.add('hidden');
-  actionTriggerSection.classList.add('hidden');
+  if (actionTriggerSection) actionTriggerSection.classList.add('hidden');
+  if (btnExecutePlan) btnExecutePlan.disabled = true;
+  closeCaseInspector();
   scorecardSection.classList.add('hidden');
 
   updateNavHistoryBadge();
@@ -1123,10 +1847,13 @@ async function generateFlowAndCases() {
   const requestProject = state.currentProject;
 
   try {
+    const pathScope = getModeAPathScopePayload();
     const payload = {
       mode: state.activeMode,
       projectPath: state.currentProject,
-      skillPath: state.selectedSkill?.path
+      skillPath: state.selectedSkill?.path,
+      pathScope: pathScope || null,
+      sourceMode: state.diffPathScope.sourceMode
     };
 
     const res = await fetch('/api/cases/preview', {
@@ -1135,11 +1862,15 @@ async function generateFlowAndCases() {
       body: JSON.stringify(payload)
     });
     const previewData = await res.json();
+    if (!res.ok || previewData.error) {
+      throw new Error(previewData.error || `HTTP ${res.status}`);
+    }
     if (requestMode !== state.activeMode || requestProject !== state.currentProject) return;
     state.currentCases = previewData.plannedCases || [];
     resetCaseResultsView();
 
-    // 更新流程管線
+    // 更新流程管線並顯示右欄
+    flowColPipeline?.classList.remove('hidden');
     flowStatusBadge.textContent = '測案已生成 (就緒)';
     flowStatusBadge.className = 'badge badge-accent';
     const steps = [
@@ -1154,13 +1885,14 @@ async function generateFlowAndCases() {
     renderCaseBlocks(state.currentCases);
     casesCountBadge.textContent = `${state.currentCases.length} 個測案`;
 
-    // 預設選取並呈現第一個測案之細節
+    // 預設選取並載入第一個測案之細節 (浮動視窗預設關閉，點選時展開)
     if (state.currentCases.length > 0) {
-      inspectCaseDetail(state.currentCases[0]);
+      inspectCaseDetail(state.currentCases[0], null, false);
     }
 
     casesSection.classList.remove('hidden');
     actionTriggerSection.classList.remove('hidden');
+    if (btnExecutePlan) btnExecutePlan.disabled = false;
     scorecardSection.classList.add('hidden');
 
     casesSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1191,6 +1923,8 @@ function clearCaseResults() {
   resetCaseResultsView();
   caseResultsToolbar?.classList.add('hidden');
   if (caseMasterList) caseMasterList.innerHTML = '';
+  if (btnExecutePlan) btnExecutePlan.disabled = true;
+  closeCaseInspector();
 }
 
 function renderCaseBlocks(cases) {
@@ -1261,13 +1995,14 @@ function renderCaseBlocks(cases) {
     </div>
   `).join('') : `<div class="case-results-empty">${emptyMessage}</div>`;
 
-  // 點選左側卡片切換右側細節
+  // 點選卡片在項目右側彈出浮動視窗顯示細節
   caseMasterList.querySelectorAll('.case-item-card').forEach(card => {
-    card.addEventListener('click', () => {
+    card.addEventListener('click', (e) => {
+      e.stopPropagation();
       const caseId = card.dataset.caseId;
       const targetCase = state.currentCases.find(item => item.id === caseId);
       if (targetCase) {
-        inspectCaseDetail(targetCase);
+        inspectCaseDetail(targetCase, card, true);
       }
     });
   });
@@ -1315,10 +2050,13 @@ async function executeTestFlow() {
 
   try {
     let endpoint = '/api/run/diff-e2e';
+    const pathScope = getModeAPathScopePayload();
     let payload = {
       projectPath: state.currentProject,
       evaluationId,
       targetUrl: window.location.origin,
+      pathScope: pathScope || null,
+      sourceMode: state.diffPathScope.sourceMode,
       mutations: [
         { type: 'Invert condition', pattern: '===' },
         { type: 'Flip boolean', pattern: 'true' }
@@ -1349,6 +2087,9 @@ async function executeTestFlow() {
       body: JSON.stringify(payload)
     });
     let runResult = await res.json();
+    if (!res.ok || runResult.error) {
+      throw new Error(runResult.error || `HTTP ${res.status}`);
+    }
     if (runResult.status === 'PENDING_AGENT') {
       flowStatusBadge.textContent = '等待 Agent 實際執行';
       flowStatusBadge.className = 'badge badge-warning';
@@ -1476,92 +2217,157 @@ async function waitForAgentEvaluation(jobId, projectPath) {
   throw new Error('等待 Agent 評測逾時（10 分鐘）');
 }
 
-// 7. 個別測案詳細資訊檢視器 (點選左側卡片，右側顯示細節)
-function inspectCaseDetail(c) {
+// 7. 個別測案詳細資訊檢視器 (點選測案項目後在項目右側出現浮動視窗顯示細節)
+function inspectCaseDetail(c, targetEl = null, openPopover = true) {
   state.selectedCaseId = c.id;
 
-  // 高亮左側選取的卡片
+  // 高亮選取的卡片
   document.querySelectorAll('.case-item-card').forEach(card => {
     card.classList.toggle('selected', card.dataset.caseId === c.id);
   });
 
-  inspectorCaseTitle.textContent = `${c.id}：${c.name}`;
-  inspectorStatusBadge.textContent = c.status || '待執行';
-  inspectorStatusBadge.className = `badge ${c.status === 'FAIL' ? 'badge-danger' : c.status === 'PASS' ? 'badge-success' : 'badge-neutral'}`;
+  if (inspectorCaseTitle) inspectorCaseTitle.textContent = `${c.id}：${c.name}`;
+  if (inspectorStatusBadge) {
+    inspectorStatusBadge.textContent = c.status || '待執行';
+    inspectorStatusBadge.className = `badge ${c.status === 'FAIL' ? 'badge-danger' : c.status === 'PASS' ? 'badge-success' : 'badge-neutral'}`;
+  }
 
-  inspectObjective.innerHTML = `
-    <strong>檢測目的：</strong>${c.objective || c.delta || '驗證邊界輸入之模型決策與反應行為。'}
-    ${c.inputDesign ? `<div style="margin-top: 0.35rem; font-size: 0.76rem; color: var(--text-muted);"><strong>輸入設計：</strong>${c.inputDesign}</div>` : ''}
-    ${c.expected ? `<div style="margin-top: 0.35rem; font-size: 0.76rem; color: #a5f3fc;"><strong>預期反應 (Expected)：</strong>${c.expected}</div>` : ''}
-  `;
+  if (inspectObjective) {
+    inspectObjective.innerHTML = `
+      <strong>檢測目的：</strong>${c.objective || c.delta || '驗證邊界輸入之模型決策與反應行為。'}
+      ${c.inputDesign ? `<div style="margin-top: 0.35rem; font-size: 0.76rem; color: var(--text-muted);"><strong>輸入設計：</strong>${c.inputDesign}</div>` : ''}
+      ${c.expected ? `<div style="margin-top: 0.35rem; font-size: 0.76rem; color: #a5f3fc;"><strong>預期反應 (Expected)：</strong>${c.expected}</div>` : ''}
+    `;
+  }
 
   // 設置可編輯的輸入框數值
-  inspectInput.value = c.input || '';
-  if (!c.defaultInput) {
-    c.defaultInput = c.input;
+  if (inspectInput) {
+    inspectInput.value = c.input || '';
+    if (!c.defaultInput) {
+      c.defaultInput = c.input;
+    }
+    updateCustomInputStatus(c);
   }
-  updateCustomInputStatus(c);
 
   // 信心指數解析
-  const conf = c.confidenceDetails || {};
-  const confidence = conf.score || c.actual?.match(/\d+%/)?.[0] || 'N/A';
-  inspectConfidenceBox.innerHTML = `
-    <div><strong>${c.evidenceType === 'ROUTER_OBSERVATION' ? '路由觀測：' : '啟發式信心度：'}</strong> <span class="badge badge-accent">${c.evidenceType === 'ROUTER_OBSERVATION' ? conf.verdict : confidence}</span>${c.evidenceType === 'ROUTER_OBSERVATION' || confidence === 'N/A' ? '' : ' (判定門檻: 35%)'}</div>
-    <div style="margin-top: 0.35rem; font-size: 0.75rem; color: #cbd5e1;">
-      ${conf.explanation || c.delta || '語意特徵符合目標範圍。'}
-    </div>
-  `;
+  if (inspectConfidenceBox) {
+    const conf = c.confidenceDetails || {};
+    const confidence = conf.score || c.actual?.match(/\d+%/)?.[0] || 'N/A';
+    inspectConfidenceBox.innerHTML = `
+      <div><strong>${c.evidenceType === 'ROUTER_OBSERVATION' ? '路由觀測：' : '啟發式信心度：'}</strong> <span class="badge badge-accent">${c.evidenceType === 'ROUTER_OBSERVATION' ? conf.verdict : confidence}</span>${c.evidenceType === 'ROUTER_OBSERVATION' || confidence === 'N/A' ? '' : ' (判定門檻: 35%)'}</div>
+      <div style="margin-top: 0.35rem; font-size: 0.75rem; color: #cbd5e1;">
+        ${conf.explanation || c.delta || '語意特徵符合目標範圍。'}
+      </div>
+    `;
+  }
 
   // 個別測案 Token 消耗明細
-  const token = c.tokenBreakdown;
-  const tokenMeasurement = c.tokenMeasurement || { status: 'UNAVAILABLE', reason: 'Agent runtime 未提供 Token 使用量。', latencyMs: null };
-  inspectTokenTable.innerHTML = token ? `
-    <div class="token-stat-row">
-      <span>輸入 Prompt Tokens (含 Context):</span>
-      <code>${token.promptTokens} tokens</code>
-    </div>
-    <div class="token-stat-row">
-      <span>輸出 Completion Tokens:</span>
-      <code>${token.completionTokens} tokens</code>
-    </div>
-    <div class="token-stat-row">
-      <span>執行延遲 (Latency):</span>
-      <code>${token.latencyMs} ms</code>
-    </div>
-    <div class="token-stat-row">
-      <span>本測案消耗總計:</span>
-      <strong>${token.totalTokens} tokens</strong>
-    </div>
-    ${token.efficiencyNote ? `<div style="margin-top: 0.35rem; font-size: 0.72rem; color: var(--accent-cyan);">${token.efficiencyNote}</div>` : ''}
-  ` : `
-    <div class="token-stat-row">
-      <span>Token 計量狀態：</span>
-      <code>${tokenMeasurement.status}</code>
-    </div>
-    <div class="token-stat-row">
-      <span>原因：</span>
-      <strong>${tokenMeasurement.reason}</strong>
-    </div>
-    <div class="token-stat-row">
-      <span>執行延遲：</span>
-      <code>${Number.isFinite(tokenMeasurement.latencyMs) ? tokenMeasurement.latencyMs + ' ms' : 'N/A'}</code>
-    </div>
-  `;
+  if (inspectTokenTable) {
+    const token = c.tokenBreakdown;
+    const tokenMeasurement = c.tokenMeasurement || { status: 'UNAVAILABLE', reason: 'Agent runtime 未提供 Token 使用量。', latencyMs: null };
+    inspectTokenTable.innerHTML = token ? `
+      <div class="token-stat-row">
+        <span>輸入 Prompt Tokens (含 Context):</span>
+        <code>${token.promptTokens} tokens</code>
+      </div>
+      <div class="token-stat-row">
+        <span>輸出 Completion Tokens:</span>
+        <code>${token.completionTokens} tokens</code>
+      </div>
+      <div class="token-stat-row">
+        <span>執行延遲 (Latency):</span>
+        <code>${token.latencyMs} ms</code>
+      </div>
+      <div class="token-stat-row">
+        <span>本測案消耗總計:</span>
+        <strong>${token.totalTokens} tokens</strong>
+      </div>
+      ${token.efficiencyNote ? `<div style="margin-top: 0.35rem; font-size: 0.72rem; color: var(--accent-cyan);">${token.efficiencyNote}</div>` : ''}
+    ` : `
+      <div class="token-stat-row">
+        <span>Token 計量狀態：</span>
+        <code>${tokenMeasurement.status}</code>
+      </div>
+      <div class="token-stat-row">
+        <span>原因：</span>
+        <strong>${tokenMeasurement.reason}</strong>
+      </div>
+      <div class="token-stat-row">
+        <span>執行延遲：</span>
+        <code>${Number.isFinite(tokenMeasurement.latencyMs) ? tokenMeasurement.latencyMs + ' ms' : 'N/A'}</code>
+      </div>
+    `;
+  }
 
   // 產出結果預覽
-  inspectOutput.textContent = c.simulatedOutput || c.actual || '尚未執行';
+  if (inspectOutput) {
+    inspectOutput.textContent = c.simulatedOutput || c.actual || '尚未執行';
+  }
 
   // 產出品質評審
-  const quality = c.qualityEvaluation || { score: 'N/A', rating: 'NOT_EVALUATED', summary: '未取得可驗證的 Agent 產出證據。' };
-  inspectQualityBox.innerHTML = `
-    <div class="flex-between">
-      <div><strong>產出品質評分：</strong> <span class="score-pill">${quality.score} / 100 [${quality.rating}]</span></div>
-      <span class="badge ${quality.score === 'N/A' ? 'badge-neutral' : 'badge-success'}">${quality.formatCompliance || quality.rating}</span>
-    </div>
-    <div style="margin-top: 0.4rem; font-size: 0.75rem; color: #cbd5e1;">
-      ${quality.summary}
-    </div>
-  `;
+  if (inspectQualityBox) {
+    const quality = c.qualityEvaluation || { score: 'N/A', rating: 'NOT_EVALUATED', summary: '未取得可驗證的 Agent 產出證據。' };
+    inspectQualityBox.innerHTML = `
+      <div class="flex-between">
+        <div><strong>產出品質評分：</strong> <span class="score-pill">${quality.score} / 100 [${quality.rating}]</span></div>
+        <span class="badge ${quality.score === 'N/A' ? 'badge-neutral' : 'badge-success'}">${quality.formatCompliance || quality.rating}</span>
+      </div>
+      <div style="margin-top: 0.4rem; font-size: 0.75rem; color: #cbd5e1;">
+        ${quality.summary}
+      </div>
+    `;
+  }
+
+  if (openPopover && caseInspectorPopover) {
+    caseInspectorPopover.classList.remove('hidden');
+    positionInspectorPopover(targetEl);
+  }
+}
+
+function positionInspectorPopover(targetEl) {
+  if (!caseInspectorPopover) return;
+  const popover = caseInspectorPopover;
+  const popoverWidth = Math.min(640, window.innerWidth - 32);
+  popover.style.width = `${popoverWidth}px`;
+
+  if (targetEl && targetEl.getBoundingClientRect) {
+    const rect = targetEl.getBoundingClientRect();
+    let left = rect.right + 12;
+    if (left + popoverWidth > window.innerWidth - 16) {
+      if (rect.left - popoverWidth - 12 > 16) {
+        left = rect.left - popoverWidth - 12;
+      } else {
+        left = Math.max(16, window.innerWidth - popoverWidth - 16);
+      }
+    }
+    let top = rect.top;
+    const popoverHeight = popover.offsetHeight || 480;
+    if (top + popoverHeight > window.innerHeight - 16) {
+      top = Math.max(16, window.innerHeight - popoverHeight - 16);
+    }
+    popover.style.left = `${Math.round(left)}px`;
+    popover.style.top = `${Math.round(top)}px`;
+  } else {
+    const col03 = document.getElementById('col03Cases');
+    if (col03) {
+      const colRect = col03.getBoundingClientRect();
+      let left = colRect.right + 12;
+      if (left + popoverWidth > window.innerWidth - 16) {
+        left = Math.max(16, window.innerWidth - popoverWidth - 16);
+      }
+      popover.style.left = `${Math.round(left)}px`;
+      popover.style.top = `${Math.max(16, Math.min(colRect.top, window.innerHeight - 500))}px`;
+    } else {
+      popover.style.left = `${Math.max(16, window.innerWidth - popoverWidth - 32)}px`;
+      popover.style.top = '72px';
+    }
+  }
+}
+
+function closeCaseInspector() {
+  if (caseInspectorPopover) {
+    caseInspectorPopover.classList.add('hidden');
+  }
 }
 
 // 8. 計分卡渲染

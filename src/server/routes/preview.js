@@ -5,9 +5,11 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { DiffAnalyzer } = require('../../core/diff-analyzer');
+const { DiffAnalyzer, PathScopeValidationError } = require('../../core/diff-analyzer');
 const { SkillEvaluator } = require('../../core/modes/skill-evaluator');
 const { HarnessAuditor } = require('../../core/modes/harness-auditor');
+
+const { ProjectSourceAnalyzer } = require('../../core/project-source-analyzer');
 
 function resolveUserPath(inputPath) {
   if (!inputPath || typeof inputPath !== 'string') return process.cwd();
@@ -19,13 +21,33 @@ function resolveUserPath(inputPath) {
   return path.resolve(resolved);
 }
 
-function getCasesPreview({ mode, projectPath, skillPath, harnessScript }) {
+function getCasesPreview({ mode, projectPath, skillPath, harnessScript, scope = 'all', pathScope = null, sourceMode = 'diff' }) {
   const resolvedProject = resolveUserPath(projectPath);
 
   if (mode === 'diff-e2e') {
-    const analyzer = new DiffAnalyzer(resolvedProject);
-    const diffData = analyzer.getDiff('all');
-    const mutations = diffData.files.flatMap(f => f.mutationCandidates);
+    let matchedFiles = [];
+    let mutations = [];
+    let scopeMetadata = null;
+    let targetSummary = '';
+
+    if (sourceMode === 'project') {
+      const projectAnalyzer = new ProjectSourceAnalyzer(resolvedProject);
+      const projectData = projectAnalyzer.getProjectMutations(pathScope);
+      matchedFiles = projectData.files.map(f => f.filePath);
+      mutations = projectData.mutations;
+      scopeMetadata = projectData.scopeMetadata;
+      targetSummary = `偵測到 ${matchedFiles.length} 個專案檔案，共標記 ${mutations.length} 個變異測試候選點。`;
+    } else {
+      const analyzer = new DiffAnalyzer(resolvedProject);
+      const diffData = analyzer.getDiff(scope || 'all', pathScope);
+      if (!diffData.files || diffData.files.length === 0) {
+        throw new PathScopeValidationError('指定路徑範圍無任何變更檔案匹配，請調整選取範圍或 pattern', 'EMPTY_PATH_SCOPE');
+      }
+      matchedFiles = diffData.files.map(f => f.filePath);
+      mutations = diffData.files.flatMap(f => f.mutationCandidates);
+      scopeMetadata = diffData.scopeMetadata || null;
+      targetSummary = `偵測到 ${diffData.files.length} 個變更檔案，共標記 ${mutations.length} 個變異測試候選點。`;
+    }
 
     const standards = [
       {
@@ -67,7 +89,7 @@ function getCasesPreview({ mode, projectPath, skillPath, harnessScript }) {
         name: '變異反向攻擊：條件邏輯顛倒測試',
         type: '變異測試 (Mutation)',
         objective: '故意將變更程式碼中的條件反轉 (如 === 改為 !==)，檢驗測案是否具備「抓壞能力」，防止假陽性。',
-        input: mutations.length > 0 ? `顛倒行: ${mutations[0].type}` : '故意顛倒條件判斷式 (=== -> !==)',
+        input: mutations.length > 0 ? `顛倒行: ${mutations[0].filePath}${mutations[0].lineNumber ? `:${mutations[0].lineNumber}` : ''} (${mutations[0].type})` : '故意顛倒條件判斷式 (=== -> !==)',
         expected: '測試斷言必須立即報錯攔截 (Killed)，證明測試具有真實鑑別力'
       },
       {
@@ -75,15 +97,18 @@ function getCasesPreview({ mode, projectPath, skillPath, harnessScript }) {
         name: '變異反向攻擊：布林值反向測試',
         type: '變異測試 (Mutation)',
         objective: '故意將狀態值 true/false 顛倒，驗證畫面或按鈕狀態切換是否受到嚴格斷言保護。',
-        input: mutations.length > 1 ? `顛倒行: ${mutations[1].type}` : '翻轉布林真假值 (true -> false)',
+        input: mutations.length > 1 ? `顛倒行: ${mutations[1].filePath}${mutations[1].lineNumber ? `:${mutations[1].lineNumber}` : ''} (${mutations[1].type})` : '翻轉布林真假值 (true -> false)',
         expected: '測試斷言必須立即報錯攔截 (Killed)，嚴禁代碼改壞測試依然 PASS'
       }
     ];
 
     return {
       mode: 'diff-e2e',
-      modeTitle: '模式 A: Git Diff E2E 智慧測試與變異鑑別',
-      targetSummary: `偵測到 ${diffData.files.length} 個變更檔案，共標記 ${mutations.length} 個變異測試候選點。`,
+      modeTitle: sourceMode === 'project' ? '模式 A: 專案原始碼 E2E 智慧測試與變異鑑別' : '模式 A: Git Diff E2E 智慧測試與變異鑑別',
+      sourceMode,
+      targetSummary,
+      matchedFiles,
+      scopeMetadata,
       standards,
       plannedCases
     };

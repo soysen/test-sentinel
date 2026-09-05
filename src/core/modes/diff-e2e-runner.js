@@ -95,7 +95,8 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
     };
     const probe = this.generateProbeSpec(options);
     const mutations = options.mutations || [];
-    const testCommand = options.testCommand || this.detectTestCommand();
+    const testStrategy = this.detectTestStrategy(mutations, options);
+    const testCommand = testStrategy.command;
     const commandTimeoutMs = options.timeoutMs || 20000;
     const estimatedMaxMs = commandTimeoutMs * (1 + (mutations.length * 2));
     reportProgress({
@@ -111,20 +112,29 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       return this.buildInconclusiveResult(
         probe,
         mutations,
-        '未提供 testCommand，無法執行基線與變異測試。'
+        '找不到可執行的測試命令，無法執行基線與變異測試。',
+        null,
+        { reasonCode: 'NO_TEST_COMMAND', testStrategy }
       );
     }
 
     reportProgress({ phase: 'baseline', step: 3, percent: 20, message: `正在執行基線：${testCommand}` });
     const baseline = this.runTestCommand(testCommand, options.timeoutMs);
+    baseline.command = testCommand;
+    baseline.strategy = testStrategy.type;
+    baseline.relatedTestFiles = testStrategy.relatedTestFiles;
     baseline.probeExecuted = `${baseline.stdout}\n${baseline.stderr}`.includes(probe.executionMarker);
     if (!baseline.passed) {
+      const reasonCode = baseline.timedOut
+        ? 'TEST_TIMEOUT'
+        : (this.looksLikeInfrastructureFailure(baseline) ? 'TEST_INFRASTRUCTURE_FAILURE' : 'TEST_BASELINE_FAILED');
       reportProgress({ phase: 'inconclusive', step: 3, percent: 100, message: `基線失敗（Exit ${baseline.exitCode ?? 'unknown'}）` });
       return this.buildInconclusiveResult(
         probe,
         mutations,
         '基線測試未通過，變異結果不具判定效力。',
-        baseline
+        baseline,
+        { reasonCode, testStrategy }
       );
     }
     reportProgress({ phase: 'baseline-complete', step: 3, percent: 30, message: '基線測試通過' });
@@ -225,6 +235,7 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
       status: evaluationStatus,
       baselinePassed: baseline.passed,
       baselineEvidence: baseline,
+      testStrategy,
       probeExecution: {
         status: hasRuntimeEvidence ? 'MEASURED' : 'NOT_MEASURED',
         marker: probe.executionMarker,
@@ -249,19 +260,99 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
     return result;
   }
 
-  detectTestCommand() {
+  quoteShellArg(value) {
+    return `'${String(value).replace(/'/g, `'\\''`)}'`;
+  }
+
+  findRelatedTestFiles(mutations = []) {
+    const sourceFiles = [...new Set(mutations.map(mutation => mutation.filePath).filter(Boolean))];
+    const testExtensions = ['.js', '.cjs', '.mjs', '.ts', '.cts', '.mts', '.jsx', '.tsx'];
+    const related = new Set();
+
+    for (const sourceFile of sourceFiles) {
+      const normalized = sourceFile.replace(/\\/g, '/');
+      const extension = path.extname(normalized);
+      const withoutExtension = normalized.slice(0, -extension.length);
+      const directory = path.posix.dirname(normalized);
+      const basename = path.posix.basename(withoutExtension);
+      const relativeFromSrc = withoutExtension.replace(/^src\//, '');
+      const candidates = [];
+
+      for (const testExtension of testExtensions) {
+        candidates.push(`${withoutExtension}.test${testExtension}`);
+        candidates.push(`${withoutExtension}.spec${testExtension}`);
+        candidates.push(`${directory}/__tests__/${basename}.test${testExtension}`);
+        candidates.push(`${directory}/__tests__/${basename}.spec${testExtension}`);
+        candidates.push(`tests/${relativeFromSrc}.test${testExtension}`);
+        candidates.push(`tests/${relativeFromSrc}.spec${testExtension}`);
+        candidates.push(`test/${relativeFromSrc}.test${testExtension}`);
+        candidates.push(`test/${relativeFromSrc}.spec${testExtension}`);
+      }
+
+      for (const candidate of candidates) {
+        const fullPath = path.resolve(this.projectPath, candidate);
+        if (!fullPath.startsWith(this.projectPath + path.sep)) continue;
+        try {
+          if (fs.statSync(fullPath).isFile()) related.add(candidate);
+        } catch {}
+      }
+    }
+
+    return [...related].sort();
+  }
+
+  readPackageScripts() {
     const packagePath = path.join(this.projectPath, 'package.json');
-    if (!fs.existsSync(packagePath)) return null;
+    if (!fs.existsSync(packagePath)) return {};
     try {
       const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-      const scripts = pkg.scripts || {};
-      for (const scriptName of ['test:e2e', 'e2e', 'test']) {
-        if (scripts[scriptName]) return `npm run ${scriptName}`;
-      }
+      return pkg.scripts || {};
     } catch (error) {
-      return null;
+      return {};
+    }
+  }
+
+  detectTestCommand(sourceMode = 'diff') {
+    const scripts = this.readPackageScripts();
+    const order = sourceMode === 'project' ? ['test', 'test:e2e', 'e2e'] : ['test:e2e', 'e2e', 'test'];
+    for (const scriptName of order) {
+      if (scripts[scriptName]) return `npm run ${scriptName}`;
     }
     return null;
+  }
+
+  detectTestStrategy(mutations = [], options = {}) {
+    if (options.testCommand) {
+      return { type: 'USER_SUPPLIED', command: options.testCommand, relatedTestFiles: [] };
+    }
+
+    if (options.sourceMode === 'project') {
+      const relatedTestFiles = this.findRelatedTestFiles(mutations);
+      if (relatedTestFiles.length > 0) {
+        const scripts = this.readPackageScripts();
+        const testScript = scripts.test || '';
+        const testArgs = relatedTestFiles.map(file => this.quoteShellArg(file)).join(' ');
+        if (/vitest/i.test(testScript)) {
+          return { type: 'TARGETED', command: `npm test -- --run ${testArgs}`, relatedTestFiles };
+        }
+        if (/react-scripts\s+test|jest/i.test(testScript)) {
+          return { type: 'TARGETED', command: `npm test -- --runTestsByPath ${testArgs}`, relatedTestFiles };
+        }
+        if (relatedTestFiles.every(file => /\.[cm]?js$/i.test(file))) {
+          return {
+            type: 'TARGETED',
+            command: relatedTestFiles.map(file => `node ${this.quoteShellArg(file)}`).join(' && '),
+            relatedTestFiles
+          };
+        }
+      }
+    }
+
+    return {
+      type: 'FULL_SUITE',
+      command: this.detectTestCommand(options.sourceMode),
+      relatedTestFiles: []
+    };
   }
 
   runTestCommand(command, timeoutMs = 20000) {
@@ -295,14 +386,29 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
     }
 
     const originalContent = fs.readFileSync(targetPath, 'utf8');
-    const occurrences = originalContent.split(mutation.originalLine).length - 1;
-    if (!mutation.originalLine || !mutation.mutatedLine || occurrences !== 1) {
-      return { mutation, status: 'INVALID', reason: `原始程式行命中 ${occurrences} 次，無法安全套用變異。`, evidence };
+    const hasLineNumber = typeof mutation.lineNumber === 'number' && mutation.lineNumber > 0;
+
+    let mutatedContent = null;
+    if (hasLineNumber) {
+      const eol = originalContent.includes('\r\n') ? '\r\n' : '\n';
+      const lines = originalContent.split(eol);
+      const targetIndex = mutation.lineNumber - 1;
+      if (targetIndex >= lines.length || lines[targetIndex] !== mutation.originalLine) {
+        return { mutation, status: 'INVALID', reason: `第 ${mutation.lineNumber} 行內容不匹配原始程式碼，無法安全套用變異。`, evidence };
+      }
+      lines[targetIndex] = mutation.mutatedLine;
+      mutatedContent = lines.join(eol);
+    } else {
+      const occurrences = originalContent.split(mutation.originalLine).length - 1;
+      if (!mutation.originalLine || !mutation.mutatedLine || occurrences !== 1) {
+        return { mutation, status: 'INVALID', reason: `原始程式行命中 ${occurrences} 次，無法安全套用變異。`, evidence };
+      }
+      mutatedContent = originalContent.replace(mutation.originalLine, mutation.mutatedLine);
     }
 
     let execution;
     try {
-      fs.writeFileSync(targetPath, originalContent.replace(mutation.originalLine, mutation.mutatedLine), 'utf8');
+      fs.writeFileSync(targetPath, mutatedContent, 'utf8');
       execution = this.runTestCommand(testCommand, timeoutMs);
       Object.assign(evidence, execution);
     } finally {
@@ -335,14 +441,16 @@ test.describe('Test Sentinel Ephemeral Probe [Timestamp: ${timestamp}]', () => {
     return /SyntaxError|Cannot find module|command not found|ERR_MODULE_NOT_FOUND|ENOMEM|heap out of memory|out of memory|Maximum call stack size exceeded|stack overflow|SIGKILL|SIGSEGV|SIGABRT|terminated by signal|ENOSPC|no space left on device|EACCES|EPERM|permission denied|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EADDRINUSE/i.test(output);
   }
 
-  buildInconclusiveResult(probe, mutations, reason, baselineEvidence = null) {
+  buildInconclusiveResult(probe, mutations, reason, baselineEvidence = null, metadata = {}) {
     return {
       timestamp: new Date().toISOString(),
       probeFile: probe.relativeFile,
       status: 'INCONCLUSIVE',
       reason,
+      reasonCode: metadata.reasonCode || null,
       baselinePassed: baselineEvidence ? baselineEvidence.passed : null,
       baselineEvidence,
+      testStrategy: metadata.testStrategy || null,
       standards: [],
       workflow: [],
       caseComparisons: [],

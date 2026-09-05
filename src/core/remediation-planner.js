@@ -17,10 +17,14 @@ function buildDiffActions(report) {
   const failures = failedCases(report);
 
   if (report.result?.status === 'INCONCLUSIVE' && report.result?.reason) {
+    const baseline = report.result?.baselineEvidence;
+    const baselineDetail = baseline
+      ? `命令：${baseline.command || 'N/A'}；Exit Code：${baseline.exitCode ?? 'unknown'}；輸出：${compact(baseline.stderr || baseline.stdout || report.result.reason)}`
+      : compact(report.result.reason);
     actions.push({
       priority: report.result?.baselinePassed === false ? 'HIGH' : 'MEDIUM',
-      title: report.result?.baselinePassed === false ? '先修復測試基線' : '補齊模式 A 評測條件',
-      detail: compact(report.result.reason)
+      title: report.result?.baselinePassed === false ? '確認測試命令與既有基線' : '補齊模式 A 評測條件',
+      detail: baselineDetail
     });
   }
 
@@ -41,8 +45,8 @@ function buildDiffActions(report) {
   if (report.scorecard?.evidence?.runtimeSafety !== 'MEASURED') {
     actions.push({
       priority: 'MEDIUM',
-      title: '補齊 Runtime 安全網證據',
-      detail: '在 UI 探針掛載 pageerror、console error 與 HTTP 5xx 監聽後重新執行評測。'
+      title: 'Runtime 探針尚未執行',
+      detail: 'Test Sentinel 已產生安全網探針，但目前測試命令未執行該探針。請設定可用的 target URL 與 Playwright 執行條件後重試；這不是產品程式缺陷的直接證據。'
     });
   }
   return actions;
@@ -162,7 +166,11 @@ function buildRemediationPlan({ mode, projectPath, report }) {
       ? '重新執行 Test Sentinel 模式 B，確認正向召回與負向抑制測案'
       : '重新執行 Test Sentinel 模式 A，確認 baseline、變異擊殺與 Runtime 安全網';
 
-  const aiPrompt = `你目前應位於專案「${relativeProject}」的 workspace。請直接修正以下 Test Sentinel 評測問題，不要只提供建議。若目前 workspace 不是此專案，先停止並回報，不要修改其他專案。\n\n實測證據：\n${evidence.join('\n')}\n\n改善目標：\n${actionLines.join('\n')}\n\n執行步驟：\n1. 先讀取上述檔案、相關呼叫端與既有測試，確認每個存活變異代表的可觀測行為。\n2. 優先補強或修正測試斷言；只有證據指出產品程式有缺陷時才修改正式程式碼。\n3. 為每個修正保留可重現問題的最小回歸測試。\n4. 執行驗證：${verification}\n\n完成條件：\n- 上述 HIGH/MEDIUM 改善項目皆有對應修改或具證據的「不修改」說明。\n- 原有測試與新增回歸測試通過。\n- 重新評測時，列出的存活變異應被擊殺；無法達成時必須保留實際輸出並說明阻礙。\n\n限制：\n- 採最小變更，遵循專案既有架構與風格，不重寫無關程式。\n- 不得直接修改 .test-eval/diff-probes/ 內的暫存探針來製造通過結果。\n- 不得捏造測試、Token、分數或成功結果；無法驗證時明確標示。\n- 最後回報根因、修改檔案、驗證命令、實際結果與仍未解決的風險。`;
+  const hasSurvivedMutations = failedCases(report).some(testCase => testCase.status === 'FAIL');
+  const mutationCompletion = hasSurvivedMutations
+    ? '\n- 重新評測時，列出的存活變異應被擊殺；無法達成時必須保留實際輸出並說明阻礙。'
+    : '';
+  const aiPrompt = `你目前應位於專案「${relativeProject}」的 workspace。請直接處理以下 Test Sentinel 評測問題，不要只提供建議。若目前 workspace 不是此專案，先停止並回報，不要修改其他專案。\n\n實測證據：\n${evidence.join('\n')}\n\n改善目標：\n${actionLines.join('\n')}\n\n執行步驟：\n1. 先確認 Test Sentinel 選用的測試命令、實際輸出與執行環境，再判斷是否需要修改目標專案。\n2. 優先補強或修正測試斷言；只有證據指出產品程式有缺陷時才修改正式程式碼。\n3. 為每個修正保留可重現問題的最小回歸測試。\n4. 執行驗證：${verification}\n\n完成條件：\n- 上述 HIGH/MEDIUM 改善項目皆有對應修改或具證據的「不修改」說明。\n- 原有測試與新增回歸測試通過。${mutationCompletion}\n\n限制：\n- 採最小變更，遵循專案既有架構與風格，不重寫無關程式。\n- 不得直接修改 .test-eval/diff-probes/ 內的暫存探針來製造通過結果。\n- 不得捏造測試、Token、分數或成功結果；無法驗證時明確標示。\n- 最後回報根因、修改檔案、驗證命令、實際結果與仍未解決的風險。`;
 
   return { actions, aiPrompt, severity, required, generatedFrom: 'MEASURED_EVIDENCE' };
 }
